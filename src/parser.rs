@@ -1,13 +1,14 @@
 use nom::{
     branch::alt,
-    bytes::complete::{escaped_transform, tag, take_until},
-    character::complete::{alphanumeric1, char, digit1, hex_digit1, none_of, one_of},
-    combinator::{all_consuming, map, map_res, not, opt, peek, value},
-    multi::{many0, separated_list, separated_nonempty_list},
+    bytes::complete::{escaped_transform, tag, take, take_until},
+    character::complete::{alphanumeric1, char, digit1, hex_digit1, none_of, oct_digit0, one_of},
+    combinator::{all_consuming, map, map_parser, map_res, not, opt, peek, value, verify},
+    multi::{fold_many0, many0, many1, separated_list, separated_nonempty_list},
     re_find,
-    sequence::{delimited, preceded, separated_pair, terminated, tuple},
+    sequence::{delimited, preceded, separated_pair, terminated, tuple, pair},
     IResult,
 };
+use std::collections::HashMap;
 
 /// Parse keyword
 fn keyword<'a, T: 'a, I: 'a, E: nom::error::ParseError<I>>(
@@ -22,23 +23,23 @@ where
 }
 
 fn block_comment(i: &str) -> IResult<&str, ()> {
-    map(delimited(tag("/*"), take_until("*/"), tag("*/")), |_| ())(i)
+    value((), delimited(tag("/*"), take_until("*/"), tag("*/")))(i)
 }
 
 fn line_comment(i: &str) -> IResult<&str, ()> {
-    map(delimited(tag("//"), take_until("\n"), char('\n')), |_| ())(i)
+    value((), delimited(tag("//"), take_until("\n"), char('\n')))(i)
 }
 
 /// Parse whitespaces (space, tab, carriage return, new line)
 fn sp(i: &str) -> IResult<&str, ()> {
     let spaces = " \t\r\n";
-    map(
+    value(
+        (),
         many0(alt((
-            map(one_of(spaces), |_| ()),
+            value((), one_of(spaces)),
             block_comment,
             line_comment,
         ))),
-        |_| (),
     )(i)
 }
 
@@ -53,16 +54,19 @@ fn ident(input: &str) -> IResult<&str, Ident> {
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct Integer(usize);
 
-/// parse simple digits
 fn integer(i: &str) -> IResult<&str, Integer> {
     map(
-        alt((
-            map_res(preceded(tag("0x"), hex_digit1), |d| {
-                usize::from_str_radix(d, 16)
-            }),
-            map_res(digit1, |d: &str| d.parse::<usize>()),
+        tuple((
+            alt((
+                map_res(preceded(tag("0x"), hex_digit1), |d| {
+                    usize::from_str_radix(d, 16)
+                }),
+                map_res(digit1, |d: &str| d.parse::<usize>()),
+            )),
+            opt(char('U')),
+            opt(char('L')),
         )),
-        Integer,
+        |(n, u, l)| Integer(n)
     )(i)
 }
 
@@ -95,18 +99,29 @@ fn string(i: &str) -> IResult<&str, String_> {
             ),
             String_,
         ),
-        map(tag("\"\""), |_| String_("".into())),
+        value(String_("".into()), tag("\"\"")),
     ))(i)
 }
 
 fn escaped_char(i: &str) -> IResult<&str, char> {
     alt((
+        value(std::char::from_u32(0x07).unwrap(), tag("a")),
+        value(std::char::from_u32(0x08).unwrap(), tag("b")),
+        value(std::char::from_u32(0x1b).unwrap(), tag("e")),
+        value(std::char::from_u32(0x0c).unwrap(), tag("f")),
         value('\n', tag("n")),
+        value('\r', tag("r")),
         value('\t', tag("t")),
+        value(std::char::from_u32(0x0b).unwrap(), tag("v")),
         value('\'', tag("'")),
         value('"', tag("\"")),
-        value('\r', tag("r")),
         value('\\', tag("\\")),
+        map_res(map_parser(take(3usize), oct_digit0), |s| {
+            std::char::from_u32(
+                u32::from_str_radix(s, 8).map_err(|_| "failed to convert".to_string())?,
+            )
+            .ok_or("invalid octodicimal".to_string())
+        }),
     ))(i)
 }
 
@@ -123,10 +138,11 @@ pub enum TypeBase {
     ULong,
     Struct(Ident),
     Union(Ident),
+    TypeName(Ident),
 }
+type TypeMap = HashMap<String, TypeRef>;
 
-fn typeref_base(i: &str) -> IResult<&str, TypeBase> {
-    // todo typedef-ed types
+fn typeref_base<'a>(i: &'a str, types: &'_ TypeMap) -> IResult<&'a str, TypeBase> {
     alt((
         value(TypeBase::Void, keyword("void")),
         value(TypeBase::Char, keyword("char")),
@@ -157,6 +173,10 @@ fn typeref_base(i: &str) -> IResult<&str, TypeBase> {
             preceded(keyword("union"), preceded(sp, ident)),
             TypeBase::Union,
         ),
+        map(
+            verify(ident, |s| types.contains_key(&s.0)),
+            TypeBase::TypeName,
+        ),
     ))(i)
 }
 
@@ -170,7 +190,7 @@ pub enum TypeOpt {
     },
 }
 
-fn func_pointer(i: &str) -> IResult<&str, TypeOpt> {
+fn func_pointer<'a>(i: &'a str, types: &'_ TypeMap) -> IResult<&'a str, TypeOpt> {
     preceded(
         char('('),
         terminated(
@@ -186,7 +206,10 @@ fn func_pointer(i: &str) -> IResult<&str, TypeOpt> {
                     ),
                     map(
                         tuple((
-                            separated_nonempty_list(preceded(sp, char(',')), preceded(sp, type_)),
+                            separated_nonempty_list(
+                                preceded(sp, char(',')),
+                                preceded(sp, |i: &'a str| type_(i, types)),
+                            ),
                             opt(tuple((preceded(sp, char(',')), preceded(sp, tag("..."))))),
                         )),
                         |(v, d)| TypeOpt::FuncPointer {
@@ -201,7 +224,7 @@ fn func_pointer(i: &str) -> IResult<&str, TypeOpt> {
     )(i)
 }
 
-fn typeopt(i: &str) -> IResult<&str, TypeOpt> {
+fn typeopt<'a>(i: &'a str, types: &'_ TypeMap) -> IResult<&'a str, TypeOpt> {
     alt((
         value(TypeOpt::Pointer, char('*')),
         map(
@@ -211,7 +234,7 @@ fn typeopt(i: &str) -> IResult<&str, TypeOpt> {
             ),
             |n| TypeOpt::Array(n.map(|x| x.0)),
         ),
-        func_pointer,
+        |i: &'a str| func_pointer(i, types),
     ))(i)
 }
 
@@ -229,17 +252,20 @@ fn storage(i: &str) -> IResult<&str, Storage> {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct TypeRef(TypeBase, Vec<TypeOpt>);
 
-fn typeref(i: &str) -> IResult<&str, TypeRef> {
+fn typeref<'a>(i: &'a str, types: &'_ TypeMap) -> IResult<&'a str, TypeRef> {
     map(
-        tuple((typeref_base, many0(preceded(sp, typeopt)))),
+        tuple((
+            |i: &'a str| typeref_base(i, types),
+            many0(preceded(sp, |i: &'a str| typeopt(i, types))),
+        )),
         |(b, o)| TypeRef(b, o),
     )(i)
 }
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct Type(TypeRef);
 
-fn type_(i: &str) -> IResult<&str, Type> {
-    map(typeref, Type)(i)
+fn type_<'a>(i: &'a str, types: &'_ TypeMap) -> IResult<&'a str, Type> {
+    map(|i: &str| typeref(i, types), Type)(i)
 }
 
 #[derive(Debug, Eq, PartialEq, Clone)]
@@ -255,16 +281,20 @@ pub enum Term {
     Cast(Type, Box<Term>),
 }
 
-fn term(i: &str) -> IResult<&str, Term> {
+fn term<'a>(i: &'a str, types: &'_ TypeMap) -> IResult<&'a str, Term> {
     alt((
         map(
             tuple((
-                delimited(char('('), preceded(sp, type_), preceded(sp, char(')'))),
-                preceded(sp, term),
+                delimited(
+                    char('('),
+                    preceded(sp, |i: &'a str| type_(i, types)),
+                    preceded(sp, char(')')),
+                ),
+                preceded(sp, |i: &'a str| term(i, types)),
             )),
             |(ty, tm)| Term::Cast(ty, Box::new(tm)),
         ),
-        map(unary, |u| Term::Unary(Box::new(u))),
+        map(|i| unary(i, types), |u| Term::Unary(Box::new(u))),
     ))(i)
 }
 
@@ -283,7 +313,9 @@ pub enum Unary {
     PostFix(Primary, Vec<PostFix>),
 }
 
-fn unary(i: &str) -> IResult<&str, Unary> {
+fn unary<'a>(i: &'a str, types: &'_ TypeMap) -> IResult<&'a str, Unary> {
+    let unary = |i: &'a str| unary(i, types);
+    let term = |i: &'a str| term(i, types);
     alt((
         map(preceded(tag("++"), preceded(sp, unary)), |u| {
             Unary::PreInc(Box::new(u))
@@ -314,7 +346,7 @@ fn unary(i: &str) -> IResult<&str, Unary> {
                 keyword("sizeof"),
                 delimited(
                     preceded(sp, char('(')),
-                    preceded(sp, type_),
+                    preceded(sp, |i| type_(i, types)),
                     preceded(sp, char(')')),
                 ),
             ),
@@ -323,9 +355,10 @@ fn unary(i: &str) -> IResult<&str, Unary> {
         map(preceded(keyword("sizeof"), preceded(sp, unary)), |u| {
             Unary::SizeofE(Box::new(u))
         }),
-        map(tuple((primary, many0(postfix))), |(pr, pf)| {
-            Unary::PostFix(pr, pf)
-        }),
+        map(
+            tuple((|i| primary(i, types), many0(|i| postfix(i, types)))),
+            |(pr, pf)| Unary::PostFix(pr, pf),
+        ),
     ))(i)
 }
 #[derive(Debug, Eq, PartialEq, Clone)]
@@ -338,12 +371,16 @@ pub enum PostFix {
     Call(Args),
 }
 
-fn postfix(i: &str) -> IResult<&str, PostFix> {
+fn postfix<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, PostFix> {
     alt((
         value(PostFix::Inc, tag("++")),
         value(PostFix::Dec, tag("--")),
         map(
-            delimited(char('['), preceded(sp, expr), preceded(sp, char(']'))),
+            delimited(
+                char('['),
+                preceded(sp, |i: &'a str| expr(i, types)),
+                preceded(sp, char(']')),
+            ),
             |e| PostFix::ArrayRef(Box::new(e)),
         ),
         map(preceded(char('.'), preceded(sp, name)), |n| {
@@ -353,7 +390,11 @@ fn postfix(i: &str) -> IResult<&str, PostFix> {
             PostFix::PMember(n)
         }),
         map(
-            delimited(char('('), preceded(sp, args), preceded(sp, char(')'))),
+            delimited(
+                char('('),
+                preceded(sp, |i: &'a str| args(i, types)),
+                preceded(sp, char(')')),
+            ),
             |a| PostFix::Call(a),
         ),
     ))(i)
@@ -368,14 +409,18 @@ pub enum Primary {
     Expr(Expr),
 }
 
-fn primary(i: &str) -> IResult<&str, Primary> {
+fn primary<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Primary> {
     alt((
         map(integer, Primary::Integer),
         map(character, Primary::Character),
         map(string, Primary::String),
         map(ident, Primary::Ident),
         map(
-            delimited(char('('), preceded(sp, expr), preceded(sp, char(')'))),
+            delimited(
+                char('('),
+                preceded(sp, |i| expr(i, types)),
+                preceded(sp, char(')')),
+            ),
             Primary::Expr,
         ),
     ))(i)
@@ -384,11 +429,11 @@ fn primary(i: &str) -> IResult<&str, Primary> {
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct Args(Vec<Expr>);
 
-fn args(i: &str) -> IResult<&str, Args> {
+fn args<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Args> {
     map(
         opt(separated_nonempty_list(
             preceded(sp, char(',')),
-            preceded(sp, expr),
+            preceded(sp, |i| expr(i, types)),
         )),
         |xs| match xs {
             Some(xs) => Args(xs),
@@ -432,6 +477,7 @@ pub enum AssignOp {
     Mod,
     And,
     Or,
+    Xor,
     Lshift,
     Rshift,
 }
@@ -442,35 +488,44 @@ fn assign_op(i: &str) -> IResult<&str, AssignOp> {
         value(AssignOp::Minus, tag("-=")),
         value(AssignOp::Mul, tag("*=")),
         value(AssignOp::Div, tag("/=")),
-        value(AssignOp::Mod, tag("*=")),
+        value(AssignOp::Mod, tag("%=")),
         value(AssignOp::And, tag("&=")),
         value(AssignOp::Or, tag("|=")),
+        value(AssignOp::Xor, tag("^=")),
         value(AssignOp::Lshift, tag("<<=")),
         value(AssignOp::Rshift, tag(">>=")),
     ))(i)
 }
 
-fn expr(i: &str) -> IResult<&str, Expr> {
+fn expr<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Expr> {
     alt((
         map(
-            separated_pair(term, preceded(sp, char('=')), preceded(sp, expr)),
+            separated_pair(
+                |i| term(i, types),
+                preceded(sp, char('=')),
+                preceded(sp, |i| expr(i, types)),
+            ),
             |(t, e)| Expr::Assign(t, Box::new(e)),
         ),
         map(
-            tuple((term, preceded(sp, assign_op), preceded(sp, expr))),
+            tuple((
+                |i| term(i, types),
+                preceded(sp, assign_op),
+                preceded(sp, |i| expr(i, types)),
+            )),
             |(t, a, e)| Expr::AssignOp(t, a, Box::new(e)),
         ),
-        expr10,
+        |i| expr10(i, types),
     ))(i)
 }
 
-fn expr10(i: &str) -> IResult<&str, Expr> {
+fn expr10<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Expr> {
     map(
         tuple((
-            expr9,
+            |i| expr9(i, types),
             opt(tuple((
-                preceded(preceded(sp, char('?')), preceded(sp, expr)),
-                preceded(preceded(sp, char(':')), preceded(sp, expr10)),
+                preceded(preceded(sp, char('?')), preceded(sp, |i| expr(i, types))),
+                preceded(preceded(sp, char(':')), preceded(sp, |i| expr10(i, types))),
             ))),
         )),
         |(e1, ternary)| match ternary {
@@ -480,11 +535,14 @@ fn expr10(i: &str) -> IResult<&str, Expr> {
     )(i)
 }
 
-fn expr9(i: &str) -> IResult<&str, Expr> {
+fn expr9<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Expr> {
     map(
         tuple((
-            expr8,
-            opt(preceded(preceded(sp, tag("||")), preceded(sp, expr9))),
+            |i| expr8(i, types),
+            opt(preceded(
+                preceded(sp, tag("||")),
+                preceded(sp, |i| expr9(i, types)),
+            )),
         )),
         |(e1, e2)| match e2 {
             Some(e2) => Expr::LogicalOr(Box::new(e1), Box::new(e2)),
@@ -493,11 +551,14 @@ fn expr9(i: &str) -> IResult<&str, Expr> {
     )(i)
 }
 
-fn expr8(i: &str) -> IResult<&str, Expr> {
+fn expr8<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Expr> {
     map(
         tuple((
-            expr7,
-            opt(preceded(preceded(sp, tag("&&")), preceded(sp, expr8))),
+            |i| expr7(i, types),
+            opt(preceded(
+                preceded(sp, tag("&&")),
+                preceded(sp, |i| expr8(i, types)),
+            )),
         )),
         |(e1, e2)| match e2 {
             Some(e2) => Expr::LogicalAnd(Box::new(e1), Box::new(e2)),
@@ -506,10 +567,11 @@ fn expr8(i: &str) -> IResult<&str, Expr> {
     )(i)
 }
 
-fn expr7(i: &str) -> IResult<&str, Expr> {
+fn expr7<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Expr> {
+    let expr7 = |i| expr7(i, types);
     map(
         tuple((
-            expr6,
+            |i| expr6(i, types),
             opt(alt((
                 tuple((preceded(sp, tag(">")), preceded(sp, expr7))),
                 tuple((preceded(sp, tag("<")), preceded(sp, expr7))),
@@ -532,11 +594,14 @@ fn expr7(i: &str) -> IResult<&str, Expr> {
     )(i)
 }
 
-fn expr6(i: &str) -> IResult<&str, Expr> {
+fn expr6<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Expr> {
     map(
         tuple((
-            expr5,
-            opt(preceded(preceded(sp, char('|')), preceded(sp, expr6))),
+            |i| expr5(i, types),
+            opt(preceded(
+                preceded(sp, char('|')),
+                preceded(sp, |i| expr6(i, types)),
+            )),
         )),
         |(e1, e2)| match e2 {
             Some(e2) => Expr::BitwiseOr(Box::new(e1), Box::new(e2)),
@@ -545,11 +610,14 @@ fn expr6(i: &str) -> IResult<&str, Expr> {
     )(i)
 }
 
-fn expr5(i: &str) -> IResult<&str, Expr> {
+fn expr5<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Expr> {
     map(
         tuple((
-            expr4,
-            opt(preceded(preceded(sp, char('^')), preceded(sp, expr5))),
+            |i| expr4(i, types),
+            opt(preceded(
+                preceded(sp, char('^')),
+                preceded(sp, |i| expr5(i, types)),
+            )),
         )),
         |(e1, e2)| match e2 {
             Some(e2) => Expr::BitwiseXor(Box::new(e1), Box::new(e2)),
@@ -558,11 +626,14 @@ fn expr5(i: &str) -> IResult<&str, Expr> {
     )(i)
 }
 
-fn expr4(i: &str) -> IResult<&str, Expr> {
+fn expr4<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Expr> {
     map(
         tuple((
-            expr3,
-            opt(preceded(preceded(sp, char('&')), preceded(sp, expr4))),
+            |i| expr3(i, types),
+            opt(preceded(
+                preceded(sp, char('&')),
+                preceded(sp, |i| expr4(i, types)),
+            )),
         )),
         |(e1, e2)| match e2 {
             Some(e2) => Expr::BitwiseAnd(Box::new(e1), Box::new(e2)),
@@ -571,13 +642,13 @@ fn expr4(i: &str) -> IResult<&str, Expr> {
     )(i)
 }
 
-fn expr3(i: &str) -> IResult<&str, Expr> {
+fn expr3<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Expr> {
     map(
         tuple((
-            expr2,
+            |i| expr2(i, types),
             opt(alt((
-                tuple((preceded(sp, tag(">>")), preceded(sp, expr3))),
-                tuple((preceded(sp, tag("<<")), preceded(sp, expr3))),
+                tuple((preceded(sp, tag(">>")), preceded(sp, |i| expr3(i, types)))),
+                tuple((preceded(sp, tag("<<")), preceded(sp, |i| expr3(i, types)))),
             ))),
         )),
         |(e1, e2)| match e2 {
@@ -589,10 +660,11 @@ fn expr3(i: &str) -> IResult<&str, Expr> {
     )(i)
 }
 
-fn expr2(i: &str) -> IResult<&str, Expr> {
+fn expr2<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Expr> {
+    let expr2 = |i| expr2(i, types);
     map(
         tuple((
-            expr1,
+            |i| expr1(i, types),
             opt(alt((
                 tuple((preceded(sp, tag("+")), preceded(sp, expr2))),
                 tuple((preceded(sp, tag("-")), preceded(sp, expr2))),
@@ -607,10 +679,11 @@ fn expr2(i: &str) -> IResult<&str, Expr> {
     )(i)
 }
 
-fn expr1(i: &str) -> IResult<&str, Expr> {
+fn expr1<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Expr> {
+    let expr1 = |i| expr1(i, types);
     map(
         tuple((
-            term,
+            |i| term(i, types),
             opt(alt((
                 tuple((preceded(sp, tag("*")), preceded(sp, expr1))),
                 tuple((preceded(sp, tag("/")), preceded(sp, expr1))),
@@ -630,17 +703,17 @@ fn expr1(i: &str) -> IResult<&str, Expr> {
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct DefVars(Storage, Type, Vec<(Name, Option<Expr>)>);
 
-fn defvars(i: &str) -> IResult<&str, DefVars> {
+fn defvars<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, DefVars> {
     map(
         tuple((
             storage,
-            preceded(sp, type_),
+            preceded(sp, |i| type_(i, types)),
             terminated(
                 separated_nonempty_list(
                     preceded(sp, char(',')),
                     tuple((
                         preceded(sp, name),
-                        opt(preceded(tuple((sp, char('='), sp)), expr)),
+                        opt(preceded(tuple((sp, char('='), sp)), |i| expr(i, types))),
                     )),
                 ),
                 preceded(sp, char(';')),
@@ -653,11 +726,14 @@ fn defvars(i: &str) -> IResult<&str, DefVars> {
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct Block(Vec<DefVars>, Vec<Statement>);
 
-fn block(i: &str) -> IResult<&str, Block> {
+fn block<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Block> {
     map(
         delimited(
             char('{'),
-            tuple((many0(preceded(sp, defvars)), many0(preceded(sp, statement)))),
+            tuple((
+                many0(preceded(sp, |i| defvars(i, types))),
+                many0(preceded(sp, |i| statement(i, types))),
+            )),
             preceded(sp, char('}')),
         ),
         |(d, s)| Block(d, s),
@@ -674,19 +750,21 @@ pub enum Statement {
     While(Expr, Box<Statement>),
     DoWhile(Expr, Box<Statement>),
     For(Expr, Expr, Expr, Box<Statement>),
-    Switch,
+    Switch(Expr, Vec<(Vec<Primary>, Vec<Statement>)>),
     Break,
     Continue,
     Goto(Ident),
     Return(Option<Expr>),
 }
 
-fn statement(i: &str) -> IResult<&str, Statement> {
+fn statement<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Statement> {
+    let expr = |i| expr(i, types);
+    let statement = |i| statement(i, types);
     alt((
-        map(char(';'), |_| Statement::None),
+        value(Statement::None, char(';')),
         map(terminated(ident, preceded(sp, char(':'))), Statement::Label),
         map(terminated(expr, preceded(sp, char(';'))), Statement::Expr),
-        map(block, Statement::Block),
+        map(|i| block(i, types), Statement::Block),
         map(
             tuple((
                 preceded(tuple((tag("if"), sp, char('('), sp)), expr),
@@ -704,6 +782,17 @@ fn statement(i: &str) -> IResult<&str, Statement> {
         ),
         map(
             tuple((
+                preceded(tuple((tag("do"), sp)), statement),
+                delimited(
+                    tuple((sp, tag("while"), sp, char('('), sp)),
+                    expr,
+                    tuple((sp, char(')'))),
+                ),
+            )),
+            |(b, e)| Statement::DoWhile(e, Box::new(b)),
+        ),
+        map(
+            tuple((
                 preceded(tuple((keyword("for"), sp, char('('), sp)), expr),
                 preceded(tuple((sp, char(';'), sp)), expr),
                 preceded(tuple((sp, char(';'), sp)), expr),
@@ -711,12 +800,18 @@ fn statement(i: &str) -> IResult<&str, Statement> {
             )),
             |(b, c, s, x)| Statement::For(b, c, s, Box::new(x)),
         ),
-        map(tuple((keyword("break"), sp, char(';'))), |_| {
-            Statement::Break
-        }),
-        map(tuple((keyword("continue"), sp, char(':'))), |_| {
-            Statement::Continue
-        }),
+        map(
+            pair(
+                preceded(tuple((keyword("switch"), sp, char('('), sp)), expr),
+                delimited(tuple((sp, char(')'), sp, char('{'), sp)), |i| cases(i, types), tuple((sp, char('}')))),
+            ),
+            |(e, c)| Statement::Switch(e, c)
+        ),
+        value(Statement::Break, tuple((keyword("break"), sp, char(';')))),
+        value(
+            Statement::Continue,
+            tuple((keyword("continue"), sp, char(':'))),
+        ),
         map(
             preceded(
                 keyword("return"),
@@ -727,32 +822,58 @@ fn statement(i: &str) -> IResult<&str, Statement> {
     ))(i)
 }
 
+fn cases<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Vec<(Vec<Primary>, Vec<Statement>)>> {
+    map(
+        pair(
+            many0(pair(
+                many1(delimited(tuple((keyword("case"), sp)), |i| primary(i, types), tuple((sp, char(':'), sp)))),
+                many1(terminated(|i| statement(i, types), sp))
+            )),
+            opt(
+                preceded(
+                    tuple((keyword("default"), sp, char(':'), sp)),
+                    many0(terminated(|i| statement(i, types), sp))
+                )
+            )
+        ),
+        |(mut cs, d)| {
+            if let Some(d) = d {
+                cs.push((vec![], d));
+            }
+            cs
+        }
+    )(i)
+}
+
 #[derive(Debug, Eq, PartialEq)]
 pub struct Params {
     params: Vec<(Type, Name)>,
     variable_length: bool,
 }
 
-fn fixed_params(i: &str) -> IResult<&str, Vec<(Type, Name)>> {
+fn fixed_params<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Vec<(Type, Name)>> {
     separated_nonempty_list(
         preceded(sp, char(',')),
-        preceded(sp, tuple((type_, preceded(sp, name)))),
+        preceded(sp, tuple((|i| type_(i, types), preceded(sp, name)))),
     )(i)
 }
 
-fn params(i: &str) -> IResult<&str, Params> {
+fn params<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Params> {
     alt((
-        map(keyword("void"), |_| Params {
-            params: vec![],
-            variable_length: false,
-        }),
         map(
-            tuple((fixed_params, opt(tuple((sp, char(','), sp, tag("...")))))),
+            tuple((
+                |i| fixed_params(i, types),
+                opt(tuple((sp, char(','), sp, tag("...")))),
+            )),
             |(p, v)| Params {
                 params: p,
                 variable_length: v.is_some(),
             },
         ),
+        map(keyword("void"), |_| Params {
+            params: vec![],
+            variable_length: false,
+        }),
     ))(i)
 }
 
@@ -766,78 +887,93 @@ pub enum TopDef {
     TypeDef(TypeRef, Ident),
 }
 
-fn defun(i: &str) -> IResult<&str, TopDef> {
+fn defun<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, TopDef> {
     map(
         tuple((
             storage,
-            preceded(sp, typeref),
+            preceded(sp, |i| typeref(i, types)),
             preceded(sp, name),
             preceded(
                 sp,
-                delimited(char('('), preceded(sp, params), preceded(sp, char(')'))),
+                delimited(
+                    char('('),
+                    preceded(sp, |i| params(i, types)),
+                    preceded(sp, char(')')),
+                ),
             ),
-            preceded(sp, block),
+            preceded(sp, |i| block(i, types)),
         )),
         |(s, t, n, p, b)| TopDef::Defun(s, t, n, p, b),
     )(i)
 }
 
-fn member_list(i: &str) -> IResult<&str, Vec<(Type, Name)>> {
+fn member_list<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Vec<(Type, Name)>> {
     delimited(
         char('{'),
         many0(tuple((
-            preceded(sp, type_),
+            preceded(sp, |i| type_(i, types)),
             preceded(sp, terminated(name, preceded(sp, char(';')))),
         ))),
         preceded(sp, char('}')),
     )(i)
 }
 
-fn defconst(i: &str) -> IResult<&str, TopDef> {
-    map(preceded(keyword("const"), preceded(sp, defvars)), |d| {
-        TopDef::DefConst(d)
-    })(i)
+fn defconst<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, TopDef> {
+    map(
+        preceded(keyword("const"), preceded(sp, |i| defvars(i, types))),
+        |d| TopDef::DefConst(d),
+    )(i)
 }
 
-fn defstruct(i: &str) -> IResult<&str, TopDef> {
+fn defstruct<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, TopDef> {
     map(
         tuple((
             preceded(keyword("struct"), preceded(sp, name)),
-            preceded(sp, terminated(member_list, preceded(sp, char(';')))),
+            preceded(
+                sp,
+                terminated(|i| member_list(i, types), preceded(sp, char(';'))),
+            ),
         )),
         |(n, s)| TopDef::DefStuct(n, s),
     )(i)
 }
 
-fn defunion(i: &str) -> IResult<&str, TopDef> {
+fn defunion<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, TopDef> {
     map(
         tuple((
             preceded(keyword("union"), preceded(sp, name)),
-            preceded(sp, terminated(member_list, preceded(sp, char(';')))),
+            preceded(
+                sp,
+                terminated(|i| member_list(i, types), preceded(sp, char(';'))),
+            ),
         )),
         |(n, s)| TopDef::DefStuct(n, s),
     )(i)
 }
 
-fn typedef(i: &str) -> IResult<&str, TopDef> {
-    map(
-        tuple((
-            preceded(tuple((keyword("typedef"), sp)), typeref),
-            preceded(sp, ident),
-        )),
-        |(t, n)| TopDef::TypeDef(t, n),
-    )(i)
+fn typedef<'a>(i: &'a str, types: &mut TypeMap) -> IResult<&'a str, TopDef> {
+    let (i, (t, id)) = tuple((
+        preceded(tuple((keyword("typedef"), sp)), |i| typeref(i, &types)),
+        preceded(sp, terminated(ident, char(';'))),
+    ))(i)?;
+
+    types.insert(id.0.clone(), t.clone());
+
+    Ok((i, TopDef::TypeDef(t, id)))
 }
 
-fn top_def(i: &str) -> IResult<&str, TopDef> {
-    alt((
-        defun,
-        map(defvars, TopDef::DefVars),
-        defconst,
-        defstruct,
-        defunion,
-        typedef,
-    ))(i)
+fn top_def<'a>(i: &'a str, types: &mut TypeMap) -> IResult<&'a str, TopDef> {
+    let res = alt((
+        |i| defun(i, types),
+        map(|i| defvars(i, types), TopDef::DefVars),
+        |i| defconst(i, types),
+        |i| defstruct(i, types),
+        |i| defunion(i, types),
+    ))(i);
+    if res.is_ok() {
+        return res;
+    }
+    typedef(i, types)
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -857,16 +993,34 @@ fn import(i: &str) -> IResult<&str, Import> {
 }
 
 #[derive(Debug)]
-pub struct Source(Vec<Import>, Vec<TopDef>);
+pub struct Source(Vec<Import>, Vec<TopDef>, TypeMap);
 
 fn source(i: &str) -> IResult<&str, Source> {
-    map(
-        all_consuming(terminated(
-            tuple((many0(preceded(sp, import)), many0(preceded(sp, top_def)))),
-            sp,
-        )),
-        |(i, d)| Source(i, d),
-    )(i)
+    let mut types = TypeMap::new();
+    let mut top_defs = vec![];
+    let (i, imports) = many0(preceded(sp, import))(i)?;
+
+    let mut i = i;
+    loop {
+        let r = sp(i);
+        if let Ok((j, _)) = r {
+            i = j;
+        } else {
+            break;
+        }
+
+        let r = top_def(i, &mut types);
+        if let Ok((j, d)) = r {
+            i = j;
+            top_defs.push(d);
+        } else {
+            break;
+        }
+    }
+
+    let (i, _) = all_consuming(sp)(i)?;
+
+    Ok((i, Source(imports, top_defs, types)))
 }
 
 #[cfg(test)]
@@ -874,9 +1028,17 @@ mod test {
     use super::*;
     use std::fmt::Debug;
 
-    fn consumed<T: Debug>(r: IResult<&str, T>) {
+    fn consumed<T: Debug>(r: IResult<&str, T>) -> T {
         dbg!(&r);
-        assert!(r.map_or(false, |(s, _)| s.len() == 0));
+        match r {
+            Ok((o, x)) => {
+                assert_eq!(o, "");
+                x
+            }
+            Err(e) => {
+                panic!("{:?}", e);
+            }
+        }
     }
     #[test]
     fn test_ident() {
@@ -906,10 +1068,14 @@ mod test {
     fn test_string() {
         assert_eq!(string(r#""foo\n\\""#), Ok(("", String_("foo\n\\".into()))));
         assert_eq!(string("\"\""), Ok(("", String_("".into()))));
+        consumed(string(r#"";\a\b\e\f\n\r\t\v""#));
+        consumed(string(r#"";\101\102\103\141\142\143""#));
     }
 
     #[test]
     fn test_typeref_base() {
+        let typeref_base = |i| typeref_base(i, &HashMap::new());
+
         assert_eq!(typeref_base("void"), Ok(("", TypeBase::Void)));
         assert_eq!(typeref_base("char"), Ok(("", TypeBase::Char)));
         assert_eq!(typeref_base("short"), Ok(("", TypeBase::Short)));
@@ -933,6 +1099,7 @@ mod test {
 
     #[test]
     fn test_typeopt() {
+        let typeopt = |i| typeopt(i, &HashMap::new());
         assert_eq!(typeopt("*"), Ok(("", TypeOpt::Pointer)));
         assert_eq!(typeopt("[]"), Ok(("", TypeOpt::Array(None))));
         assert_eq!(typeopt("[3]"), Ok(("", TypeOpt::Array(Some(3)))));
@@ -970,6 +1137,7 @@ mod test {
 
     #[test]
     fn test_typeref() {
+        let typeref = |i| typeref(i, &HashMap::new());
         assert_eq!(
             typeref("int[3]"),
             Ok(("", TypeRef(TypeBase::Int, vec![TypeOpt::Array(Some(3))])))
@@ -1020,6 +1188,7 @@ mod test {
 
     #[test]
     fn test_term() {
+        let term = |i| term(i, &HashMap::new());
         assert_eq!(
             term("++x"),
             Ok((
@@ -1071,6 +1240,7 @@ mod test {
 
     #[test]
     fn test_expr() {
+        let expr = |i| expr(i, &HashMap::new());
         assert!(dbg!(expr("x=y+z-10")).is_ok());
         assert!(dbg!(expr("a+=10")).is_ok());
         assert!(dbg!(expr("foo?(x+y):\"string\"")).is_ok());
@@ -1081,16 +1251,33 @@ mod test {
 
     #[test]
     fn test_defvars() {
-        assert!(dbg!(defvars("int foo = 20;")).is_ok());
+        let defvars = |i| defvars(i, &HashMap::new());
+        consumed(defvars("int foo = 20;"));
     }
 
     #[test]
     fn test_block() {
+        let block = |i| block(i, &HashMap::new());
         assert!(dbg!(block("{int foo = 20; return foo;}")).is_ok());
+        consumed(block(
+            r#"{
+            printf("");
+            printf(";");
+            printf(";a");
+            printf(";aa;b");
+            printf(";\"");
+            printf(";\'");
+            printf(";\a\b\e\f\n\r\t\v");
+            printf(";\101\102\103\141\142\143");
+            puts("");
+            return 0;
+        }"#,
+        ));
     }
 
     #[test]
     fn test_statement() {
+        let statement = |i| statement(i, &HashMap::new());
         assert!(dbg!(statement("*x = foo && bar ? (x + y) / z : baz ^ 4324;")).is_ok());
         assert!(dbg!(statement("*x = foo && bar ? (x + y) / z : baz ^ 4324")).is_err());
         assert!(dbg!(statement("for(i=0; i<10; i++) x += 20;")).is_ok());
@@ -1098,10 +1285,18 @@ mod test {
         assert!(dbg!(statement("if(x<y) x+=y; else {foo; return 10;}")).is_ok());
         assert!(dbg!(statement("puts(\"\");")).is_ok());
         assert!(dbg!(statement("foo();")).is_ok());
+        consumed(statement("switch(args) { case 1: case 2: foo(); default: bar(); }"));
+    }
+
+    #[test]
+    fn test_cases() {
+        let cases = |i| cases(i, &HashMap::new());
+        consumed(cases("case 1: case 2: foo(); bar(); default: baz();"));
     }
 
     #[test]
     fn test_defun() {
+        let defun = |i| defun(i, &HashMap::new());
         consumed(defun(
             r#"
         int main(int argc, char **argv) {
@@ -1139,22 +1334,134 @@ main(int argc, char **argv)
     puts("");
     return 0;
 }"#,
-        ))
+        ));
+
+        consumed(defun(r#"static void check(void* f, void* p) {}"#));
+
+        consumed(defun(
+            r#"int
+        main(int argc, char **argv)
+        {
+            int i = 3;
+        
+            printf("%d", i);    // 3
+            i += 1;
+            printf(";%d", i);   // 4
+            i -= 1;
+            printf(";%d", i);   // 3
+            i *= 4;
+            printf(";%d", i);   // 12
+            i /= 3;
+            printf(";%d", i);   // 4
+            i %= 3;
+            printf(";%d", i);   // 1
+            i &= 7;
+            printf(";%d", i);   // 1
+            i |= 6;
+            printf(";%d", i);   // 7
+            i ^= 2;
+            printf(";%d", i);   // 5
+            i >>= 2;
+            printf(";%d", i);   // 1
+            i <<= 2;
+            printf(";%d", i);   // 4
+        
+            // pointer diff arithmetic (size=1)
+            {
+                char *string = "Hello, World!";
+                char *p;
+        
+                p = string;
+                p += 1;
+                printf(";%c", *p);
+        
+                p -= 1;
+                printf(";%c", *p);
+            }
+        
+            // pointer diff arithmetic (size=4)
+            {
+                int[4] xs;
+                int* p;
+        
+                xs[0] = 75;
+                xs[1] = 76;
+                xs[2] = 77;
+                xs[3] = 78;
+        
+                p = xs;
+                p += 1;
+                printf(";%d", *p);
+        
+                p -= 1;
+                printf(";%d", *p);
+            }
+        
+            // complex LHS
+            {
+                int x = 0;
+                int *p = &x;
+        
+                *p += 1;
+                printf(";%d", *p);
+        
+                p[0] += 2;
+                printf(";%d", *p);
+        
+                *&*p += 3;
+                printf(";%d", *p);
+            }
+        
+            // complex LHS #2
+            {
+                int[2] a;
+        
+                a[0] = 77;
+                a[1] = 78;
+        
+                a[0] += 5;
+                printf(";%d", a[0]);
+        
+                *(a + 1) += 3;
+                printf(";%d", a[1]);
+            }
+        
+            puts("");
+            return 0;
+        }"#,
+        ));
     }
 
     #[test]
     fn test_defconst() {
+        let defconst = |i| defconst(i, &HashMap::new());
         consumed(defconst("const int RTLD_LAZY = 0x10;"));
     }
 
     #[test]
+    fn test_typedef() {
+        let mut types = HashMap::new();
+        consumed(typedef("typedef struct X Foo;", &mut types));
+    }
+
+    #[test]
     fn test_from_files() {
+        use std::collections::HashSet;
         use std::io::Read;
 
         let root = env!("CARGO_MANIFEST_DIR");
 
+        let ignore: HashSet<_> = [
+            "setjmptest.cb",
+            "varargs.cb",
+        ].iter().collect();
+
         for file_name in glob::glob(&format!("{}/cbc-1.0/test/*.cb", root)).unwrap() {
             let file_name = file_name.unwrap();
+            let basename = file_name.file_name().unwrap().to_str().unwrap();
+            if ignore.contains(&basename) {
+                continue;
+            }
             let mut code = String::new();
             std::fs::File::open(&file_name)
                 .unwrap()
