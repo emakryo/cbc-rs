@@ -1,14 +1,18 @@
+use crate::error::Error;
 use nom::{
     branch::alt,
     bytes::complete::{escaped_transform, tag, take, take_until},
     character::complete::{alphanumeric1, char, digit1, hex_digit1, none_of, oct_digit0, one_of},
-    combinator::{all_consuming, map, map_parser, map_res, not, opt, peek, value, verify},
+    combinator::{
+        all_consuming, map, map_parser, map_res, not, opt, peek, recognize, value, verify,
+    },
     multi::{fold_many0, many0, many1, separated_list, separated_nonempty_list},
     re_find,
-    sequence::{delimited, preceded, separated_pair, terminated, tuple, pair},
+    sequence::{delimited, pair, preceded, separated_pair, terminated, tuple},
     IResult,
 };
 use std::collections::HashMap;
+use std::path::Path;
 
 /// Parse keyword
 fn keyword<'a, T: 'a, I: 'a, E: nom::error::ParseError<I>>(
@@ -30,7 +34,7 @@ fn line_comment(i: &str) -> IResult<&str, ()> {
     value((), delimited(tag("//"), take_until("\n"), char('\n')))(i)
 }
 
-/// Parse whitespaces (space, tab, carriage return, new line)
+/// Parse whitespaces (space, tab, carriage return, new line) and comments
 fn sp(i: &str) -> IResult<&str, ()> {
     let spaces = " \t\r\n";
     value(
@@ -66,7 +70,7 @@ fn integer(i: &str) -> IResult<&str, Integer> {
             opt(char('U')),
             opt(char('L')),
         )),
-        |(n, u, l)| Integer(n)
+        |(n, u, l)| Integer(n),
     )(i)
 }
 
@@ -803,9 +807,13 @@ fn statement<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Statement> {
         map(
             pair(
                 preceded(tuple((keyword("switch"), sp, char('('), sp)), expr),
-                delimited(tuple((sp, char(')'), sp, char('{'), sp)), |i| cases(i, types), tuple((sp, char('}')))),
+                delimited(
+                    tuple((sp, char(')'), sp, char('{'), sp)),
+                    |i| cases(i, types),
+                    tuple((sp, char('}'))),
+                ),
             ),
-            |(e, c)| Statement::Switch(e, c)
+            |(e, c)| Statement::Switch(e, c),
         ),
         value(Statement::Break, tuple((keyword("break"), sp, char(';')))),
         value(
@@ -826,22 +834,24 @@ fn cases<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Vec<(Vec<Primary>,
     map(
         pair(
             many0(pair(
-                many1(delimited(tuple((keyword("case"), sp)), |i| primary(i, types), tuple((sp, char(':'), sp)))),
-                many1(terminated(|i| statement(i, types), sp))
+                many1(delimited(
+                    tuple((keyword("case"), sp)),
+                    |i| primary(i, types),
+                    tuple((sp, char(':'), sp)),
+                )),
+                many1(terminated(|i| statement(i, types), sp)),
             )),
-            opt(
-                preceded(
-                    tuple((keyword("default"), sp, char(':'), sp)),
-                    many0(terminated(|i| statement(i, types), sp))
-                )
-            )
+            opt(preceded(
+                tuple((keyword("default"), sp, char(':'), sp)),
+                many0(terminated(|i| statement(i, types), sp)),
+            )),
         ),
         |(mut cs, d)| {
             if let Some(d) = d {
                 cs.push((vec![], d));
             }
             cs
-        }
+        },
     )(i)
 }
 
@@ -883,7 +893,7 @@ pub enum TopDef {
     DefVars(DefVars),
     DefConst(DefVars),
     DefStuct(Name, Vec<(Type, Name)>),
-    DefUnion,
+    DefUnion(Name, Vec<(Type, Name)>),
     TypeDef(TypeRef, Ident),
 }
 
@@ -918,40 +928,31 @@ fn member_list<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Vec<(Type, N
     )(i)
 }
 
-fn defconst<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, TopDef> {
-    map(
-        preceded(keyword("const"), preceded(sp, |i| defvars(i, types))),
-        |d| TopDef::DefConst(d),
-    )(i)
+fn defconst<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, DefVars> {
+    preceded(keyword("const"), preceded(sp, |i| defvars(i, types)))(i)
 }
 
-fn defstruct<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, TopDef> {
-    map(
-        tuple((
-            preceded(keyword("struct"), preceded(sp, name)),
-            preceded(
-                sp,
-                terminated(|i| member_list(i, types), preceded(sp, char(';'))),
-            ),
-        )),
-        |(n, s)| TopDef::DefStuct(n, s),
-    )(i)
+fn defstruct<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, (Name, Vec<(Type, Name)>)> {
+    tuple((
+        preceded(keyword("struct"), preceded(sp, name)),
+        preceded(
+            sp,
+            terminated(|i| member_list(i, types), preceded(sp, char(';'))),
+        ),
+    ))(i)
 }
 
-fn defunion<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, TopDef> {
-    map(
-        tuple((
-            preceded(keyword("union"), preceded(sp, name)),
-            preceded(
-                sp,
-                terminated(|i| member_list(i, types), preceded(sp, char(';'))),
-            ),
-        )),
-        |(n, s)| TopDef::DefStuct(n, s),
-    )(i)
+fn defunion<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, (Name, Vec<(Type, Name)>)> {
+    tuple((
+        preceded(keyword("union"), preceded(sp, name)),
+        preceded(
+            sp,
+            terminated(|i| member_list(i, types), preceded(sp, char(';'))),
+        ),
+    ))(i)
 }
 
-fn typedef<'a>(i: &'a str, types: &mut TypeMap) -> IResult<&'a str, TopDef> {
+fn typedef<'a>(i: &'a str, types: &mut TypeMap) -> IResult<&'a str, (TypeRef, Ident)> {
     let (i, (t, id)) = tuple((
         preceded(tuple((keyword("typedef"), sp)), |i| typeref(i, &types)),
         preceded(sp, terminated(ident, char(';'))),
@@ -959,68 +960,188 @@ fn typedef<'a>(i: &'a str, types: &mut TypeMap) -> IResult<&'a str, TopDef> {
 
     types.insert(id.0.clone(), t.clone());
 
-    Ok((i, TopDef::TypeDef(t, id)))
+    Ok((i, (t, id)))
 }
 
 fn top_def<'a>(i: &'a str, types: &mut TypeMap) -> IResult<&'a str, TopDef> {
     let res = alt((
         |i| defun(i, types),
         map(|i| defvars(i, types), TopDef::DefVars),
-        |i| defconst(i, types),
-        |i| defstruct(i, types),
-        |i| defunion(i, types),
+        map(|i| defconst(i, types), TopDef::DefConst),
+        map(|i| defstruct(i, types), |(n, t)| TopDef::DefStuct(n, t)),
+        map(|i| defunion(i, types), |(n, t)| TopDef::DefUnion(n, t)),
     ))(i);
     if res.is_ok() {
         return res;
     }
-    typedef(i, types)
+    match typedef(i, types) {
+        Ok((i, o)) => Ok((i, TopDef::TypeDef(o.0, o.1))),
+        Err(e) => Err(e),
+    }
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Hash)]
 pub struct Import {
-    file_id: Vec<Ident>,
+    lib_id: String,
 }
 
 fn import(i: &str) -> IResult<&str, Import> {
     map(
         delimited(
             tuple((keyword("import"), sp)),
-            separated_nonempty_list(char('.'), ident),
+            recognize(separated_nonempty_list(char('.'), ident)),
             preceded(sp, char(';')),
         ),
-        |file_id| Import { file_id },
+        |lib_id| Import {
+            lib_id: lib_id.to_string(),
+        },
     )(i)
 }
 
+type ImportMap = HashMap<Import, Vec<HeaderDef>>;
+
 #[derive(Debug)]
-pub struct Source(Vec<Import>, Vec<TopDef>, TypeMap);
+pub struct Source(ImportMap, Vec<TopDef>, TypeMap);
 
-fn source(i: &str) -> IResult<&str, Source> {
+pub fn parse_source<P: AsRef<Path>>(i: &str, header_paths: &[P]) -> Result<Source, Error> {
     let mut types = TypeMap::new();
+    let mut imports = HashMap::new();
     let mut top_defs = vec![];
-    let (i, imports) = many0(preceded(sp, import))(i)?;
-
     let mut i = i;
-    loop {
-        let r = sp(i);
-        if let Ok((j, _)) = r {
-            i = j;
-        } else {
-            break;
-        }
 
-        let r = top_def(i, &mut types);
-        if let Ok((j, d)) = r {
-            i = j;
-            top_defs.push(d);
-        } else {
-            break;
+    loop {
+        i = sp(i)?.0;
+        match import(i) {
+            Ok((j, imp)) => {
+                if !imports.contains_key(&imp) {
+                    let code = crate::library::load(&imp.lib_id, header_paths)?;
+                    dbg!(&code);
+                    let (def, mut ts) = header(&code, header_paths)?;
+                    imports.insert(imp, def);
+                    for (k, v) in ts.drain() {
+                        types.insert(k, v);
+                    }
+                }
+                i = j;
+            }
+            _ => {
+                break;
+            }
         }
     }
 
-    let (i, _) = all_consuming(sp)(i)?;
+    loop {
+        i = sp(i)?.0;
 
-    Ok((i, Source(imports, top_defs, types)))
+        match top_def(i, &mut types) {
+            Ok((j, d)) => {
+                i = j;
+                top_defs.push(d);
+            }
+            _ => {
+                all_consuming(sp)(i)?;
+                break;
+            }
+        }
+    }
+
+    Ok(Source(imports, top_defs, types))
+}
+
+#[derive(Debug)]
+pub enum HeaderDef {
+    FuncDecl(TypeRef, Name, Params),
+    VarsDecl(DefVars),
+    DefConst(DefVars),
+    DefStuct(Name, Vec<(Type, Name)>),
+    DefUnion(Name, Vec<(Type, Name)>),
+    TypeDef(TypeRef, Ident),
+}
+
+fn func_decl<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, HeaderDef> {
+    map(
+        tuple((
+            preceded(tuple((keyword("extern"), sp)), |i| typeref(i, types)),
+            preceded(sp, name),
+            delimited(
+                tuple((sp, char('('), sp)),
+                |i| params(i, types),
+                tuple((sp, char(')'), sp, char(';'))),
+            ),
+        )),
+        |(t, n, p)| HeaderDef::FuncDecl(t, n, p),
+    )(i)
+}
+
+fn vars_decl<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, HeaderDef> {
+    map(
+        preceded(tuple((keyword("extern"), sp)), |i| defvars(i, types)),
+        |d| HeaderDef::VarsDecl(d),
+    )(i)
+}
+
+fn header_def<'a>(i: &'a str, types: &mut TypeMap) -> IResult<&'a str, HeaderDef> {
+    let res = alt((
+        |i| func_decl(i, types),
+        |i| vars_decl(i, types),
+        map(|i| defconst(i, types), HeaderDef::DefConst),
+        map(|i| defstruct(i, types), |(n, t)| HeaderDef::DefStuct(n, t)),
+        map(|i| defunion(i, types), |(n, t)| HeaderDef::DefUnion(n, t)),
+    ))(i);
+    if res.is_ok() {
+        return res;
+    }
+
+    match typedef(i, types) {
+        Ok((i, o)) => Ok((i, HeaderDef::TypeDef(o.0, o.1))),
+        Err(e) => Err(e),
+    }
+}
+
+fn header<P: AsRef<Path>>(
+    i: &str,
+    header_paths: &[P],
+) -> Result<(Vec<HeaderDef>, TypeMap), Error> {
+    let mut i = i;
+    let mut defs = vec![];
+    let mut types = TypeMap::new();
+    let mut imports = HashMap::new();
+
+    loop {
+        i = sp(i)?.0;
+        match import(i) {
+            Ok((j, imp)) => {
+                if !imports.contains_key(&imp) {
+                    let code = crate::library::load(&imp.lib_id, header_paths)?;
+                    dbg!(&code);
+                    let (def, mut ts) = header(&code, header_paths)?;
+                    imports.insert(imp, def);
+
+                    for (k, v) in ts.drain() {
+                        types.insert(k, v);
+                    }
+                }
+                i = j;
+            }
+            _ => {
+                break;
+            }
+        }
+    }
+
+    loop {
+        i = sp(i)?.0;
+        match header_def(i, &mut types) {
+            Ok((j, o)) => {
+                i = j;
+                defs.push(o);
+            }
+            Err(_) => match all_consuming(sp)(i) {
+                Ok((_, _)) => return Ok((defs, types)),
+                Err(e) => return Err(e.into()),
+            },
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1166,7 +1287,7 @@ mod test {
             Ok((
                 "",
                 Import {
-                    file_id: vec![Ident("foo".into()), Ident("bar".into())]
+                    lib_id: "foo.bar".into()
                 }
             ))
         );
@@ -1176,7 +1297,7 @@ mod test {
             Ok((
                 "   \n",
                 Import {
-                    file_id: vec![Ident("foo".into()), Ident("bar".into())]
+                    lib_id: "foo.bar".into()
                 }
             ))
         );
@@ -1285,7 +1406,9 @@ mod test {
         assert!(dbg!(statement("if(x<y) x+=y; else {foo; return 10;}")).is_ok());
         assert!(dbg!(statement("puts(\"\");")).is_ok());
         assert!(dbg!(statement("foo();")).is_ok());
-        consumed(statement("switch(args) { case 1: case 2: foo(); default: bar(); }"));
+        consumed(statement(
+            "switch(args) { case 1: case 2: foo(); default: bar(); }",
+        ));
     }
 
     #[test]
@@ -1446,29 +1569,46 @@ main(int argc, char **argv)
 
     #[test]
     fn test_from_files() {
-        use std::collections::HashSet;
         use std::io::Read;
 
         let root = env!("CARGO_MANIFEST_DIR");
 
-        let ignore: HashSet<_> = [
-            "setjmptest.cb",
-            "varargs.cb",
-        ].iter().collect();
-
         for file_name in glob::glob(&format!("{}/cbc-1.0/test/*.cb", root)).unwrap() {
             let file_name = file_name.unwrap();
-            let basename = file_name.file_name().unwrap().to_str().unwrap();
-            if ignore.contains(&basename) {
-                continue;
-            }
             let mut code = String::new();
             std::fs::File::open(&file_name)
                 .unwrap()
                 .read_to_string(&mut code)
                 .unwrap();
-            let ast = source(&code);
+            let mut header_paths = vec!["cbc-1.0/import"];
+            if let Some(p) = file_name.parent() {
+                header_paths.push(p.to_str().unwrap());
+            }
+            let ast = parse_source(&code, &header_paths);
             assert!(dbg!(&ast).is_ok(), "faild: {}", file_name.to_str().unwrap());
+        }
+    }
+
+    #[test]
+    fn test_header_files() {
+        use std::io::Read;
+        let root = env!("CARGO_MANIFEST_DIR");
+
+        for file_name in glob::glob(&format!("{}/cbc-1.0/import/**/*.hb", root)).unwrap() {
+            let file_name = file_name.unwrap();
+
+            let mut code = String::new();
+            std::fs::File::open(&file_name)
+                .unwrap()
+                .read_to_string(&mut code)
+                .unwrap();
+            let mut header_paths = vec!["cbc-1.0/import"];
+            if let Some(p) = file_name.parent() {
+                header_paths.push(p.to_str().unwrap());
+            }
+
+            let res = header(&code, &header_paths);
+            assert!(dbg!(res).is_ok(), "failed: {}", file_name.to_str().unwrap());
         }
     }
 }

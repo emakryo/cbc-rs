@@ -9,6 +9,7 @@ edition = "2018"
 [dependencies]
 
 nom = { version = "5", features = ["regexp"] }
+thiserror = "1.0"
 
 [dev-dependencies]
 
