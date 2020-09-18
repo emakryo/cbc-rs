@@ -9,7 +9,6 @@ pub fn load<P: AsRef<Path>>(libid: &str, header_paths: &[P]) -> Result<String, E
         let mut buf = String::new();
         let mut lib_path = load_path.as_ref().to_owned();
         lib_path.push(&format!("{}.hb", &lib_filename));
-        dbg!(&lib_path);
         let r = std::fs::File::open(&lib_path);
         let mut f = if let Ok(f) = r {
             f

@@ -1,3 +1,4 @@
+use crate::ast::*;
 use crate::error::Error;
 use nom::{
     branch::alt,
@@ -6,7 +7,7 @@ use nom::{
     combinator::{
         all_consuming, map, map_parser, map_res, not, opt, peek, recognize, value, verify,
     },
-    multi::{fold_many0, many0, many1, separated_list, separated_nonempty_list},
+    multi::{many0, many1, separated_nonempty_list},
     re_find,
     sequence::{delimited, pair, preceded, separated_pair, terminated, tuple},
     IResult,
@@ -47,16 +48,10 @@ fn sp(i: &str) -> IResult<&str, ()> {
     )(i)
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct Ident(String);
-
 fn ident(input: &str) -> IResult<&str, Ident> {
     let (input, name) = re_find!(input, r"^[a-zA-Z_][a-zA-Z0-9_]*")?;
     Ok((input, Ident(name.to_string())))
 }
-
-#[derive(Debug, Eq, PartialEq, Clone)]
-pub struct Integer(usize);
 
 fn integer(i: &str) -> IResult<&str, Integer> {
     map(
@@ -74,9 +69,6 @@ fn integer(i: &str) -> IResult<&str, Integer> {
     )(i)
 }
 
-#[derive(Debug, Eq, PartialEq, Clone)]
-pub struct Character(char);
-
 /// parse simple character
 fn character(i: &str) -> IResult<&str, Character> {
     delimited(
@@ -88,9 +80,6 @@ fn character(i: &str) -> IResult<&str, Character> {
         char('\''),
     )(i)
 }
-
-#[derive(Debug, Eq, PartialEq, Clone)]
-pub struct String_(String);
 
 /// parse string
 fn string(i: &str) -> IResult<&str, String_> {
@@ -129,23 +118,6 @@ fn escaped_char(i: &str) -> IResult<&str, char> {
     ))(i)
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub enum TypeBase {
-    Void,
-    Char,
-    Short,
-    Int,
-    Long,
-    UChar,
-    UShort,
-    UInt,
-    ULong,
-    Struct(Ident),
-    Union(Ident),
-    TypeName(Ident),
-}
-type TypeMap = HashMap<String, TypeRef>;
-
 fn typeref_base<'a>(i: &'a str, types: &'_ TypeMap) -> IResult<&'a str, TypeBase> {
     alt((
         value(TypeBase::Void, keyword("void")),
@@ -182,16 +154,6 @@ fn typeref_base<'a>(i: &'a str, types: &'_ TypeMap) -> IResult<&'a str, TypeBase
             TypeBase::TypeName,
         ),
     ))(i)
-}
-
-#[derive(Debug, Eq, PartialEq, Clone)]
-pub enum TypeOpt {
-    Array(Option<usize>),
-    Pointer,
-    FuncPointer {
-        params: Vec<Type>,
-        variable_length: bool,
-    },
 }
 
 fn func_pointer<'a>(i: &'a str, types: &'_ TypeMap) -> IResult<&'a str, TypeOpt> {
@@ -242,19 +204,11 @@ fn typeopt<'a>(i: &'a str, types: &'_ TypeMap) -> IResult<&'a str, TypeOpt> {
     ))(i)
 }
 
-#[derive(Debug, Eq, PartialEq, Clone)]
-pub struct Storage {
-    static_: bool,
-}
-
 fn storage(i: &str) -> IResult<&str, Storage> {
     map(opt(keyword("static")), |s| Storage {
         static_: s.is_some(),
     })(i)
 }
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct TypeRef(TypeBase, Vec<TypeOpt>);
 
 fn typeref<'a>(i: &'a str, types: &'_ TypeMap) -> IResult<&'a str, TypeRef> {
     map(
@@ -265,24 +219,13 @@ fn typeref<'a>(i: &'a str, types: &'_ TypeMap) -> IResult<&'a str, TypeRef> {
         |(b, o)| TypeRef(b, o),
     )(i)
 }
-#[derive(Debug, Eq, PartialEq, Clone)]
-pub struct Type(TypeRef);
 
 fn type_<'a>(i: &'a str, types: &'_ TypeMap) -> IResult<&'a str, Type> {
     map(|i: &str| typeref(i, types), Type)(i)
 }
 
-#[derive(Debug, Eq, PartialEq, Clone)]
-pub struct Name(Ident);
-
 fn name(i: &str) -> IResult<&str, Name> {
     map(ident, Name)(i)
-}
-
-#[derive(Debug, Eq, PartialEq, Clone)]
-pub enum Term {
-    Unary(Box<Unary>),
-    Cast(Type, Box<Term>),
 }
 
 fn term<'a>(i: &'a str, types: &'_ TypeMap) -> IResult<&'a str, Term> {
@@ -300,21 +243,6 @@ fn term<'a>(i: &'a str, types: &'_ TypeMap) -> IResult<&'a str, Term> {
         ),
         map(|i| unary(i, types), |u| Term::Unary(Box::new(u))),
     ))(i)
-}
-
-#[derive(Debug, Eq, PartialEq, Clone)]
-pub enum Unary {
-    PreInc(Box<Unary>),
-    PreDec(Box<Unary>),
-    Plus(Box<Term>),
-    Minus(Box<Term>),
-    Neg(Box<Term>),
-    Rev(Box<Term>),
-    Deref(Box<Term>),
-    Addr(Box<Term>),
-    SizeofT(Type),
-    SizeofE(Box<Unary>),
-    PostFix(Primary, Vec<PostFix>),
 }
 
 fn unary<'a>(i: &'a str, types: &'_ TypeMap) -> IResult<&'a str, Unary> {
@@ -365,15 +293,6 @@ fn unary<'a>(i: &'a str, types: &'_ TypeMap) -> IResult<&'a str, Unary> {
         ),
     ))(i)
 }
-#[derive(Debug, Eq, PartialEq, Clone)]
-pub enum PostFix {
-    Inc,
-    Dec,
-    ArrayRef(Box<Expr>),
-    Member(Name),
-    PMember(Name),
-    Call(Args),
-}
 
 fn postfix<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, PostFix> {
     alt((
@@ -404,21 +323,12 @@ fn postfix<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, PostFix> {
     ))(i)
 }
 
-#[derive(Debug, Eq, PartialEq, Clone)]
-pub enum Primary {
-    Integer(Integer),
-    Character(Character),
-    String(String_),
-    Ident(Ident),
-    Expr(Expr),
-}
-
 fn primary<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Primary> {
     alt((
         map(integer, Primary::Integer),
         map(character, Primary::Character),
         map(string, Primary::String),
-        map(ident, Primary::Ident),
+        map(ident, |id| Primary::Variable(Variable::new(id))),
         map(
             delimited(
                 char('('),
@@ -429,9 +339,6 @@ fn primary<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Primary> {
         ),
     ))(i)
 }
-
-#[derive(Debug, Eq, PartialEq, Clone)]
-pub struct Args(Vec<Expr>);
 
 fn args<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Args> {
     map(
@@ -444,46 +351,6 @@ fn args<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Args> {
             None => Args(vec![]),
         },
     )(i)
-}
-
-#[derive(Debug, Eq, PartialEq, Clone)]
-pub enum Expr {
-    Assign(Term, Box<Expr>),
-    AssignOp(Term, AssignOp, Box<Expr>),
-    Ternary(Box<Expr>, Box<Expr>, Box<Expr>),
-    LogicalOr(Box<Expr>, Box<Expr>),
-    LogicalAnd(Box<Expr>, Box<Expr>),
-    Greater(Box<Expr>, Box<Expr>),
-    Less(Box<Expr>, Box<Expr>),
-    GreaterEq(Box<Expr>, Box<Expr>),
-    LessEq(Box<Expr>, Box<Expr>),
-    Eq(Box<Expr>, Box<Expr>),
-    Neq(Box<Expr>, Box<Expr>),
-    BitwiseOr(Box<Expr>, Box<Expr>),
-    BitwiseXor(Box<Expr>, Box<Expr>),
-    BitwiseAnd(Box<Expr>, Box<Expr>),
-    LShift(Box<Expr>, Box<Expr>),
-    RShift(Box<Expr>, Box<Expr>),
-    Plus(Box<Expr>, Box<Expr>),
-    Minus(Box<Expr>, Box<Expr>),
-    Mul(Box<Expr>, Box<Expr>),
-    Div(Box<Expr>, Box<Expr>),
-    Mod(Box<Expr>, Box<Expr>),
-    Term(Term),
-}
-
-#[derive(Debug, Eq, PartialEq, Clone)]
-pub enum AssignOp {
-    Plus,
-    Minus,
-    Mul,
-    Div,
-    Mod,
-    And,
-    Or,
-    Xor,
-    Lshift,
-    Rshift,
 }
 
 fn assign_op(i: &str) -> IResult<&str, AssignOp> {
@@ -704,9 +571,6 @@ fn expr1<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Expr> {
     )(i)
 }
 
-#[derive(Debug, Eq, PartialEq, Clone)]
-pub struct DefVars(Storage, Type, Vec<(Name, Option<Expr>)>);
-
 fn defvars<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, DefVars> {
     map(
         tuple((
@@ -727,9 +591,6 @@ fn defvars<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, DefVars> {
     )(i)
 }
 
-#[derive(Debug, Eq, PartialEq, Clone)]
-pub struct Block(Vec<DefVars>, Vec<Statement>);
-
 fn block<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Block> {
     map(
         delimited(
@@ -742,23 +603,6 @@ fn block<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Block> {
         ),
         |(d, s)| Block(d, s),
     )(i)
-}
-
-#[derive(Debug, Eq, PartialEq, Clone)]
-pub enum Statement {
-    None,
-    Label(Ident),
-    Expr(Expr),
-    Block(Block),
-    If(Expr, Box<Statement>, Box<Option<Statement>>),
-    While(Expr, Box<Statement>),
-    DoWhile(Expr, Box<Statement>),
-    For(Expr, Expr, Expr, Box<Statement>),
-    Switch(Expr, Vec<(Vec<Primary>, Vec<Statement>)>),
-    Break,
-    Continue,
-    Goto(Ident),
-    Return(Option<Expr>),
 }
 
 fn statement<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Statement> {
@@ -855,12 +699,6 @@ fn cases<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Vec<(Vec<Primary>,
     )(i)
 }
 
-#[derive(Debug, Eq, PartialEq)]
-pub struct Params {
-    params: Vec<(Type, Name)>,
-    variable_length: bool,
-}
-
 fn fixed_params<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Vec<(Type, Name)>> {
     separated_nonempty_list(
         preceded(sp, char(',')),
@@ -885,16 +723,6 @@ fn params<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Params> {
             variable_length: false,
         }),
     ))(i)
-}
-
-#[derive(Debug, Eq, PartialEq)]
-pub enum TopDef {
-    Defun(Storage, TypeRef, Name, Params, Block),
-    DefVars(DefVars),
-    DefConst(DefVars),
-    DefStuct(Name, Vec<(Type, Name)>),
-    DefUnion(Name, Vec<(Type, Name)>),
-    TypeDef(TypeRef, Ident),
 }
 
 fn defun<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, TopDef> {
@@ -980,11 +808,6 @@ fn top_def<'a>(i: &'a str, types: &mut TypeMap) -> IResult<&'a str, TopDef> {
     }
 }
 
-#[derive(Debug, Eq, PartialEq, Hash)]
-pub struct Import {
-    lib_id: String,
-}
-
 fn import(i: &str) -> IResult<&str, Import> {
     map(
         delimited(
@@ -998,12 +821,7 @@ fn import(i: &str) -> IResult<&str, Import> {
     )(i)
 }
 
-type ImportMap = HashMap<Import, Vec<HeaderDef>>;
-
-#[derive(Debug)]
-pub struct Source(ImportMap, Vec<TopDef>, TypeMap);
-
-pub fn parse_source<P: AsRef<Path>>(i: &str, header_paths: &[P]) -> Result<Source, Error> {
+pub fn parse_source<P: AsRef<Path>>(i: &str, import_paths: &[P]) -> Result<Source, Error> {
     let mut types = TypeMap::new();
     let mut imports = HashMap::new();
     let mut top_defs = vec![];
@@ -1014,9 +832,9 @@ pub fn parse_source<P: AsRef<Path>>(i: &str, header_paths: &[P]) -> Result<Sourc
         match import(i) {
             Ok((j, imp)) => {
                 if !imports.contains_key(&imp) {
-                    let code = crate::library::load(&imp.lib_id, header_paths)?;
+                    let code = crate::library::load(&imp.lib_id, import_paths)?;
                     dbg!(&code);
-                    let (def, mut ts) = header(&code, header_paths)?;
+                    let (def, mut ts) = header(&code, import_paths)?;
                     imports.insert(imp, def);
                     for (k, v) in ts.drain() {
                         types.insert(k, v);
@@ -1048,17 +866,7 @@ pub fn parse_source<P: AsRef<Path>>(i: &str, header_paths: &[P]) -> Result<Sourc
     Ok(Source(imports, top_defs, types))
 }
 
-#[derive(Debug)]
-pub enum HeaderDef {
-    FuncDecl(TypeRef, Name, Params),
-    VarsDecl(DefVars),
-    DefConst(DefVars),
-    DefStuct(Name, Vec<(Type, Name)>),
-    DefUnion(Name, Vec<(Type, Name)>),
-    TypeDef(TypeRef, Ident),
-}
-
-fn func_decl<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, HeaderDef> {
+fn func_decl<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, HeaderDecl> {
     map(
         tuple((
             preceded(tuple((keyword("extern"), sp)), |i| typeref(i, types)),
@@ -1069,39 +877,36 @@ fn func_decl<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, HeaderDef> {
                 tuple((sp, char(')'), sp, char(';'))),
             ),
         )),
-        |(t, n, p)| HeaderDef::FuncDecl(t, n, p),
+        |(t, n, p)| HeaderDecl::FuncDecl(t, n, p),
     )(i)
 }
 
-fn vars_decl<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, HeaderDef> {
+fn vars_decl<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, HeaderDecl> {
     map(
         preceded(tuple((keyword("extern"), sp)), |i| defvars(i, types)),
-        |d| HeaderDef::VarsDecl(d),
+        |d| HeaderDecl::VarsDecl(d),
     )(i)
 }
 
-fn header_def<'a>(i: &'a str, types: &mut TypeMap) -> IResult<&'a str, HeaderDef> {
+fn header_def<'a>(i: &'a str, types: &mut TypeMap) -> IResult<&'a str, HeaderDecl> {
     let res = alt((
         |i| func_decl(i, types),
         |i| vars_decl(i, types),
-        map(|i| defconst(i, types), HeaderDef::DefConst),
-        map(|i| defstruct(i, types), |(n, t)| HeaderDef::DefStuct(n, t)),
-        map(|i| defunion(i, types), |(n, t)| HeaderDef::DefUnion(n, t)),
+        map(|i| defconst(i, types), HeaderDecl::DefConst),
+        map(|i| defstruct(i, types), |(n, t)| HeaderDecl::DefStuct(n, t)),
+        map(|i| defunion(i, types), |(n, t)| HeaderDecl::DefUnion(n, t)),
     ))(i);
     if res.is_ok() {
         return res;
     }
 
     match typedef(i, types) {
-        Ok((i, o)) => Ok((i, HeaderDef::TypeDef(o.0, o.1))),
+        Ok((i, o)) => Ok((i, HeaderDecl::TypeDef(o.0, o.1))),
         Err(e) => Err(e),
     }
 }
 
-fn header<P: AsRef<Path>>(
-    i: &str,
-    header_paths: &[P],
-) -> Result<(Vec<HeaderDef>, TypeMap), Error> {
+fn header<P: AsRef<Path>>(i: &str, header_paths: &[P]) -> Result<(Vec<HeaderDecl>, TypeMap), Error> {
     let mut i = i;
     let mut defs = vec![];
     let mut types = TypeMap::new();
@@ -1113,7 +918,6 @@ fn header<P: AsRef<Path>>(
             Ok((j, imp)) => {
                 if !imports.contains_key(&imp) {
                     let code = crate::library::load(&imp.lib_id, header_paths)?;
-                    dbg!(&code);
                     let (def, mut ts) = header(&code, header_paths)?;
                     imports.insert(imp, def);
 
@@ -1315,7 +1119,7 @@ mod test {
             Ok((
                 "",
                 Term::Unary(Box::new(Unary::PreInc(Box::new(Unary::PostFix(
-                    Primary::Ident(Ident("x".into())),
+                    Primary::Variable(Variable { name: Ident("x".into()) }),
                     vec![]
                 )))))
             ))
@@ -1325,7 +1129,7 @@ mod test {
             Ok((
                 "",
                 Term::Unary(Box::new(Unary::PostFix(
-                    Primary::Ident(Ident("x".into())),
+                    Primary::Variable(Variable { name: Ident("x".into()) }),
                     vec![PostFix::Dec]
                 )))
             ))
@@ -1349,7 +1153,7 @@ mod test {
             Ok((
                 "",
                 Term::Unary(Box::new(Unary::PostFix(
-                    Primary::Ident(Ident("foo".into())),
+                    Primary::Variable(Variable { name: Ident("foo".into()) }),
                     vec![
                         PostFix::Member(Name(Ident("bar".into()))),
                         PostFix::PMember(Name(Ident("baz".into())))

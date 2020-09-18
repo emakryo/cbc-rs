@@ -8,6 +8,9 @@ pub enum Error {
     Incomplete,
     #[error("Import error")]
     Import(String),
+    #[error("Semantic error")]
+    Semantic(String),
+
 }
 
 impl<I> From<nom::Err<(I, nom::error::ErrorKind)>> for Error {
