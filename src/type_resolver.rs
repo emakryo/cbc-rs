@@ -1,6 +1,5 @@
-use crate::ast::{self, *};
+use crate::ast::*;
 use crate::error::Error;
-use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
@@ -185,8 +184,8 @@ pub fn resolve_types(ast: &mut Source) -> Result<TypeTable, Error> {
                 HeaderDecl::TypeDef(typeref, n) => {
                     type_table.add_usertype(n.clone(), typeref.clone())?;
                 }
-                HeaderDecl::DefStuct(n, members) => todo!(),
-                HeaderDecl::DefUnion(n, members) => todo!(),
+                HeaderDecl::DefStuct(_, _) => todo!(),
+                HeaderDecl::DefUnion(_, _) => todo!(),
                 _ => (),
             }
         }
