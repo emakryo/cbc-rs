@@ -3,7 +3,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct Ident(pub String);
 
 impl ToString for Ident {
@@ -44,7 +44,7 @@ pub enum TypeOpt {
     Array(Option<usize>),
     Pointer,
     FuncPointer {
-        params: Vec<Type>,
+        params: Vec<TypeRef>,
         variable_length: bool,
     },
 }
@@ -54,25 +54,38 @@ pub struct Storage {
     pub static_: bool,
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct TypeRef(pub TypeBase, pub Vec<TypeOpt>);
-
-#[derive(Debug, Eq, PartialEq, Clone)]
-pub struct Type(pub TypeRef);
-
-#[derive(Debug, Eq, PartialEq, Clone)]
-pub struct Name(pub Ident);
-
-impl ToString for Name {
-    fn to_string(&self) -> String {
-        self.0.to_string()
-    }
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub enum TypeRef {
+    Array {
+        base: Box<TypeRef>,
+        size: Option<usize>,
+    },
+    Function {
+        base: Box<TypeRef>,
+        params: Vec<TypeRef>,
+        variable_length: bool,
+    },
+    Char,
+    UChar,
+    Short,
+    UShort,
+    Int,
+    UInt,
+    Long,
+    ULong,
+    Pointer {
+        base: Box<TypeRef>,
+    },
+    Struct(Ident),
+    Union(Ident),
+    User(Ident),
+    Void,
 }
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub enum Term {
     Unary(Box<Unary>),
-    Cast(Type, Box<Term>),
+    Cast(TypeRef, Box<Term>),
 }
 
 #[derive(Debug, Eq, PartialEq, Clone)]
@@ -82,13 +95,13 @@ pub enum Unary {
     Op(UnaryOp, Box<Term>),
     Deref(Box<Term>),
     Addr(Box<Term>),
-    SizeofT(Type),
+    SizeofT(TypeRef),
     SizeofE(Box<Unary>),
     PostInc(Box<Unary>),
     PostDec(Box<Unary>),
     ArrayRef(Box<Unary>, Box<Expr>),
-    Member(Box<Unary>, Name),
-    PMember(Box<Unary>, Name),
+    Member(Box<Unary>, Ident),
+    PMember(Box<Unary>, Ident),
     Call(Box<Unary>, Args),
     Primary(Primary),
 }
@@ -106,8 +119,8 @@ pub enum Postfix {
     Inc,
     Dec,
     ArrayRef(Box<Expr>),
-    Member(Name),
-    PMember(Name),
+    Member(Ident),
+    PMember(Ident),
     Call(Args),
 }
 
@@ -190,7 +203,7 @@ pub enum BinOp {
 }
 
 #[derive(Debug, Eq, PartialEq, Clone)]
-pub struct DefVars(pub Storage, pub Type, pub Vec<(Name, Option<Expr>)>);
+pub struct DefVars(pub Storage, pub TypeRef, pub Vec<(Ident, Option<Expr>)>);
 
 #[derive(Debug, Clone)]
 pub struct Block {
@@ -255,17 +268,17 @@ pub enum Statement {
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct Params {
-    pub params: Vec<(Type, Name)>,
+    pub params: Vec<(TypeRef, Ident)>,
     pub variable_length: bool,
 }
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum TopDef {
-    Defun(Storage, TypeRef, Name, Params, Block),
+    Defun(Storage, TypeRef, Ident, Params, Block),
     DefVars(DefVars),
     DefConst(DefVars),
-    DefStuct(Name, Vec<(Type, Name)>),
-    DefUnion(Name, Vec<(Type, Name)>),
+    DefStuct(Ident, Vec<(TypeRef, Ident)>),
+    DefUnion(Ident, Vec<(TypeRef, Ident)>),
     TypeDef(TypeRef, Ident),
 }
 
@@ -281,10 +294,10 @@ pub struct Source(pub ImportMap, pub Vec<TopDef>, pub TypeMap);
 
 #[derive(Debug)]
 pub enum HeaderDecl {
-    FuncDecl(TypeRef, Name, Params),
+    FuncDecl(TypeRef, Ident, Params),
     VarsDecl(DefVars),
     DefConst(DefVars),
-    DefStuct(Name, Vec<(Type, Name)>),
-    DefUnion(Name, Vec<(Type, Name)>),
+    DefStuct(Ident, Vec<(TypeRef, Ident)>),
+    DefUnion(Ident, Vec<(TypeRef, Ident)>),
     TypeDef(TypeRef, Ident),
 }

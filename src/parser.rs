@@ -3,7 +3,7 @@ use crate::error::Error;
 use nom::{
     branch::alt,
     bytes::complete::{escaped_transform, tag, take, take_until},
-    character::complete::{alphanumeric1, char, digit1, hex_digit1, none_of, oct_digit0, one_of},
+    character::complete::{char, digit1, hex_digit1, none_of, oct_digit0, one_of},
     combinator::{
         all_consuming, map, map_parser, map_res, not, opt, peek, recognize, value, verify,
     },
@@ -20,11 +20,14 @@ fn keyword<'a, T: 'a, I: 'a, E: nom::error::ParseError<I>>(
     keyword: T,
 ) -> impl Fn(I) -> IResult<I, I, E>
 where
-    I: nom::InputTake + nom::Compare<T> + Clone + nom::InputTakeAtPosition,
+    I: nom::InputIter + nom::InputTake + nom::Compare<T> + Clone + nom::InputTakeAtPosition + std::borrow::Borrow<str>,
     T: nom::InputLength + Clone,
-    <I as nom::InputTakeAtPosition>::Item: nom::AsChar,
+    //<I as nom::InputTakeAtPosition>::Item: nom::AsChar,
 {
-    terminated(tag(keyword), peek(not(alphanumeric1)))
+    terminated(tag(keyword), peek(not(verify( take(1usize), |c: &str| {
+        let c = c.chars().next().unwrap();
+        c.is_ascii_alphanumeric() || c == '_'
+    }))))
 }
 
 fn block_comment(i: &str) -> IResult<&str, ()> {
@@ -65,7 +68,7 @@ fn integer(i: &str) -> IResult<&str, Integer> {
             opt(char('U')),
             opt(char('L')),
         )),
-        |(n, u, l)| Integer(n),
+        |(n, _u, _l)| Integer(n),
     )(i)
 }
 
@@ -118,41 +121,38 @@ fn escaped_char(i: &str) -> IResult<&str, char> {
     ))(i)
 }
 
-fn typeref_base<'a>(i: &'a str, types: &'_ TypeMap) -> IResult<&'a str, TypeBase> {
+fn typeref_base<'a>(i: &'a str, types: &'_ TypeMap) -> IResult<&'a str, TypeRef> {
     alt((
-        value(TypeBase::Void, keyword("void")),
-        value(TypeBase::Char, keyword("char")),
-        value(TypeBase::Short, keyword("short")),
-        value(TypeBase::Int, keyword("int")),
-        value(TypeBase::Long, keyword("long")),
+        value(TypeRef::Void, keyword("void")),
+        value(TypeRef::Char, keyword("char")),
+        value(TypeRef::Short, keyword("short")),
+        value(TypeRef::Int, keyword("int")),
+        value(TypeRef::Long, keyword("long")),
         value(
-            TypeBase::UChar,
+            TypeRef::UChar,
             preceded(keyword("unsigned"), preceded(sp, keyword("char"))),
         ),
         value(
-            TypeBase::UShort,
+            TypeRef::UShort,
             preceded(keyword("unsigned"), preceded(sp, keyword("short"))),
         ),
         value(
-            TypeBase::UInt,
+            TypeRef::UInt,
             preceded(keyword("unsigned"), preceded(sp, keyword("int"))),
         ),
         value(
-            TypeBase::ULong,
+            TypeRef::ULong,
             preceded(keyword("unsigned"), preceded(sp, keyword("long"))),
         ),
         map(
             preceded(keyword("struct"), preceded(sp, ident)),
-            TypeBase::Struct,
+            TypeRef::Struct,
         ),
         map(
             preceded(keyword("union"), preceded(sp, ident)),
-            TypeBase::Union,
+            TypeRef::Union,
         ),
-        map(
-            verify(ident, |s| types.contains_key(&s.0)),
-            TypeBase::TypeName,
-        ),
+        map(verify(ident, |s| types.contains_key(&s.0)), TypeRef::User),
     ))(i)
 }
 
@@ -174,7 +174,7 @@ fn func_pointer<'a>(i: &'a str, types: &'_ TypeMap) -> IResult<&'a str, TypeOpt>
                         tuple((
                             separated_nonempty_list(
                                 preceded(sp, char(',')),
-                                preceded(sp, |i: &'a str| type_(i, types)),
+                                preceded(sp, |i: &'a str| typeref(i, types)),
                             ),
                             opt(tuple((preceded(sp, char(',')), preceded(sp, tag("..."))))),
                         )),
@@ -216,16 +216,24 @@ fn typeref<'a>(i: &'a str, types: &'_ TypeMap) -> IResult<&'a str, TypeRef> {
             |i: &'a str| typeref_base(i, types),
             many0(preceded(sp, |i: &'a str| typeopt(i, types))),
         )),
-        |(b, o)| TypeRef(b, o),
+        |(base, opts)| {
+            opts.into_iter().fold(base, |base, opt| {
+                let base = Box::new(base);
+                match opt {
+                    TypeOpt::Array(size) => TypeRef::Array { base, size },
+                    TypeOpt::FuncPointer {
+                        params,
+                        variable_length,
+                    } => TypeRef::Function {
+                        base,
+                        params,
+                        variable_length,
+                    },
+                    TypeOpt::Pointer => TypeRef::Pointer { base },
+                }
+            })
+        },
     )(i)
-}
-
-fn type_<'a>(i: &'a str, types: &'_ TypeMap) -> IResult<&'a str, Type> {
-    map(|i: &str| typeref(i, types), Type)(i)
-}
-
-fn name(i: &str) -> IResult<&str, Name> {
-    map(ident, Name)(i)
 }
 
 fn term<'a>(i: &'a str, types: &'_ TypeMap) -> IResult<&'a str, Term> {
@@ -234,7 +242,7 @@ fn term<'a>(i: &'a str, types: &'_ TypeMap) -> IResult<&'a str, Term> {
             tuple((
                 delimited(
                     char('('),
-                    preceded(sp, |i: &'a str| type_(i, types)),
+                    preceded(sp, |i: &'a str| typeref(i, types)),
                     preceded(sp, char(')')),
                 ),
                 preceded(sp, |i: &'a str| term(i, types)),
@@ -278,7 +286,7 @@ fn unary<'a>(i: &'a str, types: &'_ TypeMap) -> IResult<&'a str, Unary> {
                 keyword("sizeof"),
                 delimited(
                     preceded(sp, char('(')),
-                    preceded(sp, |i| type_(i, types)),
+                    preceded(sp, |i| typeref(i, types)),
                     preceded(sp, char(')')),
                 ),
             ),
@@ -315,10 +323,10 @@ fn postfix<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Postfix> {
             ),
             |e| Postfix::ArrayRef(Box::new(e)),
         ),
-        map(preceded(char('.'), preceded(sp, name)), |n| {
+        map(preceded(char('.'), preceded(sp, ident)), |n| {
             Postfix::Member(n)
         }),
-        map(preceded(tag("->"), preceded(sp, name)), |n| {
+        map(preceded(tag("->"), preceded(sp, ident)), |n| {
             Postfix::PMember(n)
         }),
         map(
@@ -582,12 +590,12 @@ fn defvars<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, DefVars> {
     map(
         tuple((
             storage,
-            preceded(sp, |i| type_(i, types)),
+            preceded(sp, |i| typeref(i, types)),
             terminated(
                 separated_nonempty_list(
                     preceded(sp, char(',')),
                     tuple((
-                        preceded(sp, name),
+                        preceded(sp, ident),
                         opt(preceded(tuple((sp, char('='), sp)), |i| expr(i, types))),
                     )),
                 ),
@@ -710,10 +718,10 @@ fn cases<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Vec<(Vec<Primary>,
     )(i)
 }
 
-fn fixed_params<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Vec<(Type, Name)>> {
+fn fixed_params<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Vec<(TypeRef, Ident)>> {
     separated_nonempty_list(
         preceded(sp, char(',')),
-        preceded(sp, tuple((|i| type_(i, types), preceded(sp, name)))),
+        preceded(sp, tuple((|i| typeref(i, types), preceded(sp, ident)))),
     )(i)
 }
 
@@ -741,7 +749,7 @@ fn defun<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, TopDef> {
         tuple((
             storage,
             preceded(sp, |i| typeref(i, types)),
-            preceded(sp, name),
+            preceded(sp, ident),
             preceded(
                 sp,
                 delimited(
@@ -756,12 +764,12 @@ fn defun<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, TopDef> {
     )(i)
 }
 
-fn member_list<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Vec<(Type, Name)>> {
+fn member_list<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Vec<(TypeRef, Ident)>> {
     delimited(
         char('{'),
         many0(tuple((
-            preceded(sp, |i| type_(i, types)),
-            preceded(sp, terminated(name, preceded(sp, char(';')))),
+            preceded(sp, |i| typeref(i, types)),
+            preceded(sp, terminated(ident, preceded(sp, char(';')))),
         ))),
         preceded(sp, char('}')),
     )(i)
@@ -771,9 +779,9 @@ fn defconst<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, DefVars> {
     preceded(keyword("const"), preceded(sp, |i| defvars(i, types)))(i)
 }
 
-fn defstruct<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, (Name, Vec<(Type, Name)>)> {
+fn defstruct<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, (Ident, Vec<(TypeRef, Ident)>)> {
     tuple((
-        preceded(keyword("struct"), preceded(sp, name)),
+        preceded(keyword("struct"), preceded(sp, ident)),
         preceded(
             sp,
             terminated(|i| member_list(i, types), preceded(sp, char(';'))),
@@ -781,9 +789,9 @@ fn defstruct<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, (Name, Vec<(Ty
     ))(i)
 }
 
-fn defunion<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, (Name, Vec<(Type, Name)>)> {
+fn defunion<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, (Ident, Vec<(TypeRef, Ident)>)> {
     tuple((
-        preceded(keyword("union"), preceded(sp, name)),
+        preceded(keyword("union"), preceded(sp, ident)),
         preceded(
             sp,
             terminated(|i| member_list(i, types), preceded(sp, char(';'))),
@@ -880,7 +888,7 @@ fn func_decl<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, HeaderDecl> {
     map(
         tuple((
             preceded(tuple((keyword("extern"), sp)), |i| typeref(i, types)),
-            preceded(sp, name),
+            preceded(sp, ident),
             delimited(
                 tuple((sp, char('('), sp)),
                 |i| params(i, types),
@@ -1014,20 +1022,20 @@ mod test {
     fn test_typeref_base() {
         let typeref_base = |i| typeref_base(i, &HashMap::new());
 
-        assert_eq!(typeref_base("void"), Ok(("", TypeBase::Void)));
-        assert_eq!(typeref_base("char"), Ok(("", TypeBase::Char)));
-        assert_eq!(typeref_base("short"), Ok(("", TypeBase::Short)));
-        assert_eq!(typeref_base("long"), Ok(("", TypeBase::Long)));
-        assert_eq!(typeref_base("unsigned char"), Ok(("", TypeBase::UChar)));
-        assert_eq!(typeref_base("unsigned short"), Ok(("", TypeBase::UShort)));
-        assert_eq!(typeref_base("unsigned long"), Ok(("", TypeBase::ULong)));
+        assert_eq!(typeref_base("void"), Ok(("", TypeRef::Void)));
+        assert_eq!(typeref_base("char"), Ok(("", TypeRef::Char)));
+        assert_eq!(typeref_base("short"), Ok(("", TypeRef::Short)));
+        assert_eq!(typeref_base("long"), Ok(("", TypeRef::Long)));
+        assert_eq!(typeref_base("unsigned char"), Ok(("", TypeRef::UChar)));
+        assert_eq!(typeref_base("unsigned short"), Ok(("", TypeRef::UShort)));
+        assert_eq!(typeref_base("unsigned long"), Ok(("", TypeRef::ULong)));
         assert_eq!(
             typeref_base("struct bar"),
-            Ok(("", TypeBase::Struct(Ident("bar".to_string()))))
+            Ok(("", TypeRef::Struct(Ident("bar".to_string()))))
         );
         assert_eq!(
             typeref_base("union bar"),
-            Ok(("", TypeBase::Union(Ident("bar".to_string()))))
+            Ok(("", TypeRef::Union(Ident("bar".to_string()))))
         );
 
         //dbg!(typeref_base("unsignedlong"));
@@ -1046,10 +1054,7 @@ mod test {
             Ok((
                 "",
                 TypeOpt::FuncPointer {
-                    params: vec![
-                        Type(TypeRef(TypeBase::Int, vec![])),
-                        Type(TypeRef(TypeBase::UChar, vec![])),
-                    ],
+                    params: vec![TypeRef::Int, TypeRef::UChar,],
                     variable_length: false,
                 }
             ))
@@ -1059,10 +1064,7 @@ mod test {
             Ok((
                 "",
                 TypeOpt::FuncPointer {
-                    params: vec![
-                        Type(TypeRef(TypeBase::Int, vec![])),
-                        Type(TypeRef(TypeBase::UChar, vec![])),
-                    ],
+                    params: vec![TypeRef::Int, TypeRef::UChar,],
                     variable_length: true,
                 }
             ))
@@ -1078,19 +1080,25 @@ mod test {
         let typeref = |i| typeref(i, &HashMap::new());
         assert_eq!(
             typeref("int[3]"),
-            Ok(("", TypeRef(TypeBase::Int, vec![TypeOpt::Array(Some(3))])))
+            Ok((
+                "",
+                TypeRef::Array {
+                    base: Box::new(TypeRef::Int),
+                    size: Some(3)
+                }
+            ))
         );
         assert_eq!(
             typeref("long (int*)"),
             Ok((
                 "",
-                TypeRef(
-                    TypeBase::Long,
-                    vec![TypeOpt::FuncPointer {
-                        params: vec![Type(TypeRef(TypeBase::Int, vec![TypeOpt::Pointer]))],
-                        variable_length: false,
-                    }]
-                )
+                TypeRef::Function {
+                    base: Box::new(TypeRef::Long),
+                    params: vec![TypeRef::Pointer {
+                        base: Box::new(TypeRef::Int)
+                    }],
+                    variable_length: false,
+                },
             ))
         );
 
@@ -1150,11 +1158,8 @@ mod test {
             Ok((
                 "",
                 Term::Cast(
-                    Type(TypeRef(TypeBase::Int, vec![])),
-                    Box::new(Term::Unary(Box::new(Unary::SizeofT(Type(TypeRef(
-                        TypeBase::Short,
-                        vec![]
-                    ))))))
+                    TypeRef::Int,
+                    Box::new(Term::Unary(Box::new(Unary::SizeofT(TypeRef::Short)))),
                 )
             ))
         );
@@ -1168,9 +1173,9 @@ mod test {
                         Box::new(Unary::Primary(Primary::Variable(Variable::new(Ident(
                             "foo".into()
                         ))))),
-                        Name(Ident("bar".into())),
+                        Ident("bar".into()),
                     )),
-                    Name(Ident("baz".into())),
+                    Ident("baz".into()),
                 )))
             ))
         );
@@ -1383,6 +1388,7 @@ main(int argc, char **argv)
     fn test_typedef() {
         let mut types = HashMap::new();
         consumed(typedef("typedef struct X Foo;", &mut types));
+        consumed(typedef("typedef struct a struct_a;", &mut types));
     }
 
     #[test]

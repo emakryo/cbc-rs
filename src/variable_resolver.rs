@@ -20,9 +20,12 @@ impl Entity {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct Type;
+
 #[derive(Debug)]
 pub struct GlobalScope {
-    types: HashMap<String, Type>,
+    types: HashMap<TypeRef, Type>,
     root: Rc<RefCell<LocalScope>>,
 }
 
@@ -187,7 +190,10 @@ pub fn resolve_variables(ast: &mut Source) -> Result<GlobalScope, Error> {
                     if let Some(expr) = expr {
                         expr.resolve_variables(Rc::clone(&global.root))?;
                     } else {
-                        return Err(Error::Semantic(format!("const declaration has no initial value: {}", name.to_string())));
+                        return Err(Error::Semantic(format!(
+                            "const declaration has no initial value: {}",
+                            name.to_string()
+                        )));
                     }
                 }
             }
@@ -210,7 +216,7 @@ impl Block {
             statement.resolve_variables(Rc::clone(&scope))?;
         }
 
-Ok(())
+        Ok(())
     }
 }
 
@@ -358,7 +364,7 @@ impl Primary {
                 if let Some(entity) = entity {
                     v.set_entity(entity);
                 } else {
-                    return Err(Error::Semantic(format!("Undefined variable: {}", name)))
+                    return Err(Error::Semantic(format!("Undefined variable: {}", name)));
                 }
             }
             Primary::Integer(_) | Primary::Character(_) | Primary::String(_) => (),
@@ -403,7 +409,7 @@ mod tests {
             let mut ast = parse_source(&code, &header_paths);
             let scope = resolve_variables(&mut ast.as_mut().unwrap());
             if scope.is_err() {
-                dbg!(scope);
+                dbg!(scope).ok();
             }
             assert!(ast.is_ok(), "faild: {}", file_name.to_str().unwrap());
         }
