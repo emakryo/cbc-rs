@@ -81,8 +81,10 @@ impl std::fmt::Debug for LocalScope {
 
 impl LocalScope {
     fn root() -> Self {
+        let mut entities = HashMap::new();
+        entities.insert("NULL".into(), Rc::new(Entity::var("NULL".into())));
         LocalScope {
-            entities: HashMap::new(),
+            entities,
             children: Vec::new(),
             parent: None,
         }
@@ -400,7 +402,9 @@ mod tests {
             }
             let mut ast = parse_source(&code, &header_paths);
             let scope = resolve_variables(&mut ast.as_mut().unwrap());
-            dbg!(scope);
+            if scope.is_err() {
+                dbg!(scope);
+            }
             assert!(ast.is_ok(), "faild: {}", file_name.to_str().unwrap());
         }
     }
