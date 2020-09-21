@@ -10,7 +10,6 @@ pub enum Error {
     Import(String),
     #[error("Semantic error")]
     Semantic(String),
-
 }
 
 impl<I> From<nom::Err<(I, nom::error::ErrorKind)>> for Error {

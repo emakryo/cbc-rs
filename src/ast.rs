@@ -1,4 +1,7 @@
+use crate::variable_resolver::{Entity, LocalScope};
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Ident(pub String);
@@ -76,18 +79,30 @@ pub enum Term {
 pub enum Unary {
     PreInc(Box<Unary>),
     PreDec(Box<Unary>),
-    Plus(Box<Term>),
-    Minus(Box<Term>),
-    Neg(Box<Term>),
-    Rev(Box<Term>),
+    Op(UnaryOp, Box<Term>),
     Deref(Box<Term>),
     Addr(Box<Term>),
     SizeofT(Type),
     SizeofE(Box<Unary>),
-    PostFix(Primary, Vec<PostFix>),
+    PostInc(Box<Unary>),
+    PostDec(Box<Unary>),
+    ArrayRef(Box<Unary>, Box<Expr>),
+    Member(Box<Unary>, Name),
+    PMember(Box<Unary>, Name),
+    Call(Box<Unary>, Args),
+    Primary(Primary),
 }
+
 #[derive(Debug, Eq, PartialEq, Clone)]
-pub enum PostFix {
+pub enum UnaryOp {
+    Plus,
+    Minus,
+    Neg,
+    Rev,
+}
+
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub enum Postfix {
     Inc,
     Dec,
     ArrayRef(Box<Expr>),
@@ -107,17 +122,24 @@ pub enum Primary {
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct Variable {
-    pub name: Ident,
+    name: Ident,
+    entity: Option<Rc<Entity>>,
 }
 
 impl Variable {
     pub fn new(name: Ident) -> Self {
-        Variable {
-            name,
+        Variable { name, entity: None }
+    }
+    pub fn name(&self) -> String {
+        self.name.0.clone()
+    }
+    pub fn set_entity(&mut self, entity: Rc<Entity>) {
+        if self.entity.is_some() {
+            panic!("variable already set entity");
         }
+        self.entity = Some(entity)
     }
 }
-
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct Args(pub Vec<Expr>);
@@ -127,24 +149,7 @@ pub enum Expr {
     Assign(Term, Box<Expr>),
     AssignOp(Term, AssignOp, Box<Expr>),
     Ternary(Box<Expr>, Box<Expr>, Box<Expr>),
-    LogicalOr(Box<Expr>, Box<Expr>),
-    LogicalAnd(Box<Expr>, Box<Expr>),
-    Greater(Box<Expr>, Box<Expr>),
-    Less(Box<Expr>, Box<Expr>),
-    GreaterEq(Box<Expr>, Box<Expr>),
-    LessEq(Box<Expr>, Box<Expr>),
-    Eq(Box<Expr>, Box<Expr>),
-    Neq(Box<Expr>, Box<Expr>),
-    BitwiseOr(Box<Expr>, Box<Expr>),
-    BitwiseXor(Box<Expr>, Box<Expr>),
-    BitwiseAnd(Box<Expr>, Box<Expr>),
-    LShift(Box<Expr>, Box<Expr>),
-    RShift(Box<Expr>, Box<Expr>),
-    Plus(Box<Expr>, Box<Expr>),
-    Minus(Box<Expr>, Box<Expr>),
-    Mul(Box<Expr>, Box<Expr>),
-    Div(Box<Expr>, Box<Expr>),
-    Mod(Box<Expr>, Box<Expr>),
+    BinOp(BinOp, Box<Expr>, Box<Expr>),
     Term(Term),
 }
 
@@ -163,10 +168,73 @@ pub enum AssignOp {
 }
 
 #[derive(Debug, Eq, PartialEq, Clone)]
-pub struct DefVars(pub Storage, pub Type, pub Vec<(Name, Option<Expr>)>);
+pub enum BinOp {
+    LogicalOr,
+    LogicalAnd,
+    Greater,
+    Less,
+    GreaterEq,
+    LessEq,
+    Eq,
+    Neq,
+    BitwiseOr,
+    BitwiseXor,
+    BitwiseAnd,
+    LShift,
+    RShift,
+    Plus,
+    Minus,
+    Mul,
+    Div,
+    Mod,
+}
 
 #[derive(Debug, Eq, PartialEq, Clone)]
-pub struct Block(pub Vec<DefVars>, pub Vec<Statement>);
+pub struct DefVars(pub Storage, pub Type, pub Vec<(Name, Option<Expr>)>);
+
+#[derive(Debug, Clone)]
+pub struct Block {
+    vars: Vec<DefVars>,
+    stmts: Vec<Statement>,
+    scope: Option<Rc<RefCell<LocalScope>>>,
+}
+
+impl PartialEq for Block {
+    fn eq(&self, other: &Block) -> bool {
+        self.vars.eq(&other.vars) && self.stmts.eq(&other.stmts)
+    }
+}
+
+impl Eq for Block {}
+
+impl Block {
+    pub fn new(vars: Vec<DefVars>, stmts: Vec<Statement>) -> Block {
+        Block {
+            vars,
+            stmts,
+            scope: None,
+        }
+    }
+
+    pub fn ref_vars(&self) -> &Vec<DefVars> {
+        &self.vars
+    }
+
+    pub fn mut_stmts(&mut self) -> &mut Vec<Statement> {
+        &mut self.stmts
+    }
+
+    pub fn set_scope(&mut self, scope: Rc<RefCell<LocalScope>>) {
+        if self.scope.is_some() {
+            panic!("Already scope has set");
+        }
+        self.scope = Some(scope);
+    }
+
+    pub fn get_scope(&self) -> Option<Rc<RefCell<LocalScope>>> {
+        self.scope.as_ref().map(Rc::clone)
+    }
+}
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub enum Statement {
@@ -178,14 +246,14 @@ pub enum Statement {
     While(Expr, Box<Statement>),
     DoWhile(Expr, Box<Statement>),
     For(Expr, Expr, Expr, Box<Statement>),
-    Switch(Expr, Vec<(Vec<Primary>, Vec<Statement>)>),
+    Switch(Expr, Vec<(Vec<Primary>, Block)>),
     Break,
     Continue,
     Goto(Ident),
     Return(Option<Expr>),
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub struct Params {
     pub params: Vec<(Type, Name)>,
     pub variable_length: bool,

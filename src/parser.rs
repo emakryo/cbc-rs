@@ -245,6 +245,15 @@ fn term<'a>(i: &'a str, types: &'_ TypeMap) -> IResult<&'a str, Term> {
     ))(i)
 }
 
+fn unary_op<'a>(i: &'a str) -> IResult<&'a str, UnaryOp> {
+    alt((
+        value(UnaryOp::Plus, tag("+")),
+        value(UnaryOp::Minus, tag("-")),
+        value(UnaryOp::Neg, tag("!")),
+        value(UnaryOp::Rev, tag("~")),
+    ))(i)
+}
+
 fn unary<'a>(i: &'a str, types: &'_ TypeMap) -> IResult<&'a str, Unary> {
     let unary = |i: &'a str| unary(i, types);
     let term = |i: &'a str| term(i, types);
@@ -255,17 +264,8 @@ fn unary<'a>(i: &'a str, types: &'_ TypeMap) -> IResult<&'a str, Unary> {
         map(preceded(tag("--"), preceded(sp, unary)), |u| {
             Unary::PreDec(Box::new(u))
         }),
-        map(preceded(tag("+"), preceded(sp, term)), |t| {
-            Unary::Plus(Box::new(t))
-        }),
-        map(preceded(tag("-"), preceded(sp, term)), |t| {
-            Unary::Minus(Box::new(t))
-        }),
-        map(preceded(tag("!"), preceded(sp, term)), |t| {
-            Unary::Neg(Box::new(t))
-        }),
-        map(preceded(tag("~"), preceded(sp, term)), |t| {
-            Unary::Rev(Box::new(t))
+        map(tuple((unary_op, preceded(sp, term))), |(op, t)| {
+            Unary::Op(op, Box::new(t))
         }),
         map(preceded(char('*'), preceded(sp, term)), |t| {
             Unary::Deref(Box::new(t))
@@ -289,28 +289,37 @@ fn unary<'a>(i: &'a str, types: &'_ TypeMap) -> IResult<&'a str, Unary> {
         }),
         map(
             tuple((|i| primary(i, types), many0(|i| postfix(i, types)))),
-            |(pr, pf)| Unary::PostFix(pr, pf),
+            |(pr, pfs)| {
+                pfs.into_iter().fold(Unary::Primary(pr), |u, pf| match pf {
+                    Postfix::Inc => Unary::PostInc(Box::new(u)),
+                    Postfix::Dec => Unary::PostDec(Box::new(u)),
+                    Postfix::ArrayRef(e) => Unary::ArrayRef(Box::new(u), e),
+                    Postfix::Member(n) => Unary::Member(Box::new(u), n),
+                    Postfix::PMember(n) => Unary::PMember(Box::new(u), n),
+                    Postfix::Call(a) => Unary::Call(Box::new(u), a),
+                })
+            },
         ),
     ))(i)
 }
 
-fn postfix<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, PostFix> {
+fn postfix<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Postfix> {
     alt((
-        value(PostFix::Inc, tag("++")),
-        value(PostFix::Dec, tag("--")),
+        value(Postfix::Inc, tag("++")),
+        value(Postfix::Dec, tag("--")),
         map(
             delimited(
                 char('['),
                 preceded(sp, |i: &'a str| expr(i, types)),
                 preceded(sp, char(']')),
             ),
-            |e| PostFix::ArrayRef(Box::new(e)),
+            |e| Postfix::ArrayRef(Box::new(e)),
         ),
         map(preceded(char('.'), preceded(sp, name)), |n| {
-            PostFix::Member(n)
+            Postfix::Member(n)
         }),
         map(preceded(tag("->"), preceded(sp, name)), |n| {
-            PostFix::PMember(n)
+            Postfix::PMember(n)
         }),
         map(
             delimited(
@@ -318,7 +327,7 @@ fn postfix<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, PostFix> {
                 preceded(sp, |i: &'a str| args(i, types)),
                 preceded(sp, char(')')),
             ),
-            |a| PostFix::Call(a),
+            |a| Postfix::Call(a),
         ),
     ))(i)
 }
@@ -416,7 +425,7 @@ fn expr9<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Expr> {
             )),
         )),
         |(e1, e2)| match e2 {
-            Some(e2) => Expr::LogicalOr(Box::new(e1), Box::new(e2)),
+            Some(e2) => Expr::BinOp(BinOp::LogicalOr, Box::new(e1), Box::new(e2)),
             None => e1,
         },
     )(i)
@@ -432,10 +441,21 @@ fn expr8<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Expr> {
             )),
         )),
         |(e1, e2)| match e2 {
-            Some(e2) => Expr::LogicalAnd(Box::new(e1), Box::new(e2)),
+            Some(e2) => Expr::BinOp(BinOp::LogicalAnd, Box::new(e1), Box::new(e2)),
             None => e1,
         },
     )(i)
+}
+
+fn cond_op<'a>(i: &'a str) -> IResult<&'a str, BinOp> {
+    alt((
+        value(BinOp::LessEq, tag("<=")),
+        value(BinOp::GreaterEq, tag(">=")),
+        value(BinOp::Less, tag("<")),
+        value(BinOp::Greater, tag(">")),
+        value(BinOp::Neq, tag("!=")),
+        value(BinOp::Eq, tag("==")),
+    ))(i)
 }
 
 fn expr7<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Expr> {
@@ -443,23 +463,10 @@ fn expr7<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Expr> {
     map(
         tuple((
             |i| expr6(i, types),
-            opt(alt((
-                tuple((preceded(sp, tag(">")), preceded(sp, expr7))),
-                tuple((preceded(sp, tag("<")), preceded(sp, expr7))),
-                tuple((preceded(sp, tag(">=")), preceded(sp, expr7))),
-                tuple((preceded(sp, tag("<=")), preceded(sp, expr7))),
-                tuple((preceded(sp, tag("==")), preceded(sp, expr7))),
-                tuple((preceded(sp, tag("!=")), preceded(sp, expr7))),
-            ))),
+            opt(tuple((preceded(sp, cond_op), preceded(sp, expr7)))),
         )),
         |(e1, e2)| match e2 {
-            Some(("<", e2)) => Expr::Less(Box::new(e1), Box::new(e2)),
-            Some((">", e2)) => Expr::Greater(Box::new(e1), Box::new(e2)),
-            Some(("<=", e2)) => Expr::LessEq(Box::new(e1), Box::new(e2)),
-            Some((">=", e2)) => Expr::GreaterEq(Box::new(e1), Box::new(e2)),
-            Some(("==", e2)) => Expr::Eq(Box::new(e1), Box::new(e2)),
-            Some(("!=", e2)) => Expr::Neq(Box::new(e1), Box::new(e2)),
-            Some(_) => unimplemented!(),
+            Some((op, e2)) => Expr::BinOp(op, Box::new(e1), Box::new(e2)),
             None => e1,
         },
     )(i)
@@ -475,7 +482,7 @@ fn expr6<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Expr> {
             )),
         )),
         |(e1, e2)| match e2 {
-            Some(e2) => Expr::BitwiseOr(Box::new(e1), Box::new(e2)),
+            Some(e2) => Expr::BinOp(BinOp::BitwiseOr, Box::new(e1), Box::new(e2)),
             None => e1,
         },
     )(i)
@@ -491,7 +498,7 @@ fn expr5<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Expr> {
             )),
         )),
         |(e1, e2)| match e2 {
-            Some(e2) => Expr::BitwiseXor(Box::new(e1), Box::new(e2)),
+            Some(e2) => Expr::BinOp(BinOp::BitwiseXor, Box::new(e1), Box::new(e2)),
             None => e1,
         },
     )(i)
@@ -507,7 +514,7 @@ fn expr4<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Expr> {
             )),
         )),
         |(e1, e2)| match e2 {
-            Some(e2) => Expr::BitwiseAnd(Box::new(e1), Box::new(e2)),
+            Some(e2) => Expr::BinOp(BinOp::BitwiseAnd, Box::new(e1), Box::new(e2)),
             None => e1,
         },
     )(i)
@@ -523,8 +530,8 @@ fn expr3<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Expr> {
             ))),
         )),
         |(e1, e2)| match e2 {
-            Some((">>", e2)) => Expr::RShift(Box::new(e1), Box::new(e2)),
-            Some(("<<", e2)) => Expr::LShift(Box::new(e1), Box::new(e2)),
+            Some((">>", e2)) => Expr::BinOp(BinOp::RShift, Box::new(e1), Box::new(e2)),
+            Some(("<<", e2)) => Expr::BinOp(BinOp::LShift, Box::new(e1), Box::new(e2)),
             Some(_) => unimplemented!(),
             None => e1,
         },
@@ -542,8 +549,8 @@ fn expr2<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Expr> {
             ))),
         )),
         |(e1, e2)| match e2 {
-            Some(("+", e2)) => Expr::Plus(Box::new(e1), Box::new(e2)),
-            Some(("-", e2)) => Expr::Minus(Box::new(e1), Box::new(e2)),
+            Some(("+", e2)) => Expr::BinOp(BinOp::Plus, Box::new(e1), Box::new(e2)),
+            Some(("-", e2)) => Expr::BinOp(BinOp::Minus, Box::new(e1), Box::new(e2)),
             Some(_) => unimplemented!(),
             None => e1,
         },
@@ -562,9 +569,9 @@ fn expr1<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Expr> {
             ))),
         )),
         |(e1, e2)| match e2 {
-            Some(("*", e2)) => Expr::Mul(Box::new(Expr::Term(e1)), Box::new(e2)),
-            Some(("/", e2)) => Expr::Div(Box::new(Expr::Term(e1)), Box::new(e2)),
-            Some(("%", e2)) => Expr::Mod(Box::new(Expr::Term(e1)), Box::new(e2)),
+            Some(("*", e2)) => Expr::BinOp(BinOp::Mul, Box::new(Expr::Term(e1)), Box::new(e2)),
+            Some(("/", e2)) => Expr::BinOp(BinOp::Div, Box::new(Expr::Term(e1)), Box::new(e2)),
+            Some(("%", e2)) => Expr::BinOp(BinOp::Mod, Box::new(Expr::Term(e1)), Box::new(e2)),
             Some(_) => unimplemented!(),
             None => Expr::Term(e1),
         },
@@ -601,7 +608,7 @@ fn block<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Block> {
             )),
             preceded(sp, char('}')),
         ),
-        |(d, s)| Block(d, s),
+        |(d, s)| Block::new(d, s),
     )(i)
 }
 
@@ -609,6 +616,18 @@ fn statement<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Statement> {
     let expr = |i| expr(i, types);
     let statement = |i| statement(i, types);
     alt((
+        value(Statement::Break, tuple((keyword("break"), sp, char(';')))),
+        value(
+            Statement::Continue,
+            tuple((keyword("continue"), sp, char(';'))),
+        ),
+        map(
+            preceded(
+                keyword("return"),
+                terminated(opt(preceded(sp, expr)), preceded(sp, char(';'))),
+            ),
+            Statement::Return,
+        ),
         value(Statement::None, char(';')),
         map(terminated(ident, preceded(sp, char(':'))), Statement::Label),
         map(terminated(expr, preceded(sp, char(';'))), Statement::Expr),
@@ -659,22 +678,10 @@ fn statement<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Statement> {
             ),
             |(e, c)| Statement::Switch(e, c),
         ),
-        value(Statement::Break, tuple((keyword("break"), sp, char(';')))),
-        value(
-            Statement::Continue,
-            tuple((keyword("continue"), sp, char(':'))),
-        ),
-        map(
-            preceded(
-                keyword("return"),
-                terminated(opt(preceded(sp, expr)), preceded(sp, char(';'))),
-            ),
-            Statement::Return,
-        ),
     ))(i)
 }
 
-fn cases<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Vec<(Vec<Primary>, Vec<Statement>)>> {
+fn cases<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Vec<(Vec<Primary>, Block)>> {
     map(
         pair(
             many0(pair(
@@ -683,11 +690,15 @@ fn cases<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Vec<(Vec<Primary>,
                     |i| primary(i, types),
                     tuple((sp, char(':'), sp)),
                 )),
-                many1(terminated(|i| statement(i, types), sp)),
+                map(many1(terminated(|i| statement(i, types), sp)), |s| {
+                    Block::new(vec![], s)
+                }),
             )),
             opt(preceded(
                 tuple((keyword("default"), sp, char(':'), sp)),
-                many0(terminated(|i| statement(i, types), sp)),
+                map(many0(terminated(|i| statement(i, types), sp)), |s| {
+                    Block::new(vec![], s)
+                }),
             )),
         ),
         |(mut cs, d)| {
@@ -833,7 +844,6 @@ pub fn parse_source<P: AsRef<Path>>(i: &str, import_paths: &[P]) -> Result<Sourc
             Ok((j, imp)) => {
                 if !imports.contains_key(&imp) {
                     let code = crate::library::load(&imp.lib_id, import_paths)?;
-                    dbg!(&code);
                     let (def, mut ts) = header(&code, import_paths)?;
                     imports.insert(imp, def);
                     for (k, v) in ts.drain() {
@@ -906,7 +916,10 @@ fn header_def<'a>(i: &'a str, types: &mut TypeMap) -> IResult<&'a str, HeaderDec
     }
 }
 
-fn header<P: AsRef<Path>>(i: &str, header_paths: &[P]) -> Result<(Vec<HeaderDecl>, TypeMap), Error> {
+fn header<P: AsRef<Path>>(
+    i: &str,
+    header_paths: &[P],
+) -> Result<(Vec<HeaderDecl>, TypeMap), Error> {
     let mut i = i;
     let mut defs = vec![];
     let mut types = TypeMap::new();
@@ -1118,9 +1131,8 @@ mod test {
             term("++x"),
             Ok((
                 "",
-                Term::Unary(Box::new(Unary::PreInc(Box::new(Unary::PostFix(
-                    Primary::Variable(Variable { name: Ident("x".into()) }),
-                    vec![]
+                Term::Unary(Box::new(Unary::PreInc(Box::new(Unary::Primary(
+                    Primary::Variable(Variable::new(Ident("x".into())))
                 )))))
             ))
         );
@@ -1128,10 +1140,9 @@ mod test {
             term("x--"),
             Ok((
                 "",
-                Term::Unary(Box::new(Unary::PostFix(
-                    Primary::Variable(Variable { name: Ident("x".into()) }),
-                    vec![PostFix::Dec]
-                )))
+                Term::Unary(Box::new(Unary::PostDec(Box::new(Unary::Primary(
+                    Primary::Variable(Variable::new(Ident("x".into())))
+                )))))
             ))
         );
         assert_eq!(
@@ -1152,12 +1163,14 @@ mod test {
             term("foo.bar->baz"),
             Ok((
                 "",
-                Term::Unary(Box::new(Unary::PostFix(
-                    Primary::Variable(Variable { name: Ident("foo".into()) }),
-                    vec![
-                        PostFix::Member(Name(Ident("bar".into()))),
-                        PostFix::PMember(Name(Ident("baz".into())))
-                    ]
+                Term::Unary(Box::new(Unary::PMember(
+                    Box::new(Unary::Member(
+                        Box::new(Unary::Primary(Primary::Variable(Variable::new(Ident(
+                            "foo".into()
+                        ))))),
+                        Name(Ident("bar".into())),
+                    )),
+                    Name(Ident("baz".into())),
                 )))
             ))
         );
@@ -1172,6 +1185,7 @@ mod test {
         assert!(dbg!(expr("x*y+z/y-19")).is_ok());
         assert!(dbg!(expr("\"\"")).is_ok());
         assert!(dbg!(expr("foo()")).is_ok());
+        consumed(expr("x>=y"));
     }
 
     #[test]
