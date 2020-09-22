@@ -33,6 +33,12 @@ pub enum Type {
     User(String, Rc<Type>),
 }
 
+impl Type {
+    fn is_void(&self) -> bool {
+        *self == Type::Void
+    }
+}
+
 #[derive(Debug)]
 pub struct TypeTable(HashMap<TypeRef, Rc<Type>>);
 
@@ -206,7 +212,62 @@ pub fn resolve_types(ast: &mut Source) -> Result<TypeTable, Error> {
         }
     }
 
+    check_void(&type_table)?;
+    check_duplication(&type_table)?;
+    check_recursive_definition(&type_table)?;
+
     Ok(type_table)
+}
+
+pub fn check_void(type_table: &TypeTable) -> Result<(), Error> {
+    fn check(t: &Rc<Type>, type_table: &TypeTable) -> Result<(), Error> {
+        let err = Err(Error::Semantic(format!("Invalid void in type")));
+        match t.as_ref() {
+            Type::Array { base , size: _} => {
+                if base.as_ref().is_void() {
+                    return err;
+                }
+            },
+            Type::Struct { members, name: _ } | Type::Union { members, name: _ }=> {
+                for (r, _) in members {
+                    if let Some(t) = type_table.get(r) {
+                        if t.as_ref().is_void() {
+                            return err;
+                        }
+                    } else {
+                        return Err(Error::Semantic(format!("Unknown type: {:?}", r)));
+                    }
+                }
+            },
+            _ => (),
+        }
+        Ok(())
+    }
+
+    for t in type_table.0.values() {
+        check(t, type_table)?;
+    }
+
+    Ok(())
+}
+
+pub fn check_duplication(type_table: &TypeTable) -> Result<(), Error> {
+    for t in type_table.0.values() {
+        match t.as_ref() {
+            Type::Struct{ members , name: _ } | Type::Union { members, name: _ } => {
+                let mut names = HashSet::new();
+                for (_, n) in members {
+                    if names.contains(n) {
+                        return Err(Error::Semantic(format!("Duplicated field: {}", n.to_string())));
+                    }
+                    names.insert(n.clone());
+                }
+            }
+            _ => ()
+        }
+    }
+
+    Ok(())
 }
 
 pub fn check_recursive_definition(type_table: &TypeTable) -> Result<(), Error> {
@@ -292,17 +353,6 @@ mod tests {
             if table.is_err() {
                 dbg!(&table);
             }
-
-            if let Ok(table) = table {
-                if let Err(e) = check_recursive_definition(&table) {
-                    dbg!(e);
-                }
-            }
-            // assert!(
-            //     dbg!(&table).is_ok(),
-            //     "faild: {}",
-            //     file_name.to_str().unwrap()
-            // );
         }
     }
 }
