@@ -115,16 +115,6 @@ pub enum UnaryOp {
 }
 
 #[derive(Debug, Eq, PartialEq, Clone)]
-pub enum Postfix {
-    Inc,
-    Dec,
-    ArrayRef(Box<Expr>),
-    Member(Ident),
-    PMember(Ident),
-    Call(Args),
-}
-
-#[derive(Debug, Eq, PartialEq, Clone)]
 pub enum Primary {
     Integer(Integer),
     Character(Character),
@@ -151,6 +141,9 @@ impl Variable {
             panic!("variable already set entity");
         }
         self.entity = Some(entity)
+    }
+    pub fn get_entity(&self) -> Option<Rc<Entity>> {
+        self.entity.as_ref().map(Rc::clone)
     }
 }
 
@@ -231,6 +224,10 @@ impl Block {
 
     pub fn ref_vars(&self) -> &Vec<DefVars> {
         &self.vars
+    }
+
+    pub fn ref_stmts(&self) -> &Vec<Statement> {
+        &self.stmts
     }
 
     pub fn mut_stmts(&mut self) -> &mut Vec<Statement> {

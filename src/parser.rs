@@ -270,6 +270,17 @@ fn unary_op<'a>(i: &'a str) -> IResult<&'a str, UnaryOp> {
     ))(i)
 }
 
+// temporary type for parsing, not included in AST
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub enum Postfix {
+    Inc,
+    Dec,
+    ArrayRef(Box<Expr>),
+    Member(Ident),
+    PMember(Ident),
+    Call(Args),
+}
+
 fn unary<'a>(i: &'a str, types: &'_ TypeMap) -> IResult<&'a str, Unary> {
     let unary = |i: &'a str| unary(i, types);
     let term = |i: &'a str| term(i, types);

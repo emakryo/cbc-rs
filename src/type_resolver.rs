@@ -34,8 +34,49 @@ pub enum Type {
 }
 
 impl Type {
-    fn is_void(&self) -> bool {
+    pub fn is_void(&self) -> bool {
         *self == Type::Void
+    }
+
+    pub fn long() -> Rc<Self> {
+        Rc::new(Type::Integer {
+            size: 8,
+            signed: true,
+        })
+    }
+
+    pub fn char() -> Rc<Self> {
+        Rc::new(Type::Integer {
+            size: 1,
+            signed: false,
+        })
+    }
+
+    pub fn string() -> Rc<Self> {
+        Rc::new(Type::Array {
+            base: Self::char(),
+            size: None,
+        })
+    }
+
+    pub fn get_field_type(&self, name: &Ident, type_table: &TypeTable) -> Result<Rc<Self>, Error> {
+        match self {
+            Type::Struct { members, .. } | Type::Union { members, .. } => {
+                if let Some((t, _)) = members.iter().find(|(_, n)| n == name) {
+                    if let Some(t) = type_table.get(t) {
+                        Ok(t)
+                    } else {
+                        Err(Error::Semantic(format!("Invalid type: {:?}", t)))
+                    }
+                } else {
+                    Err(Error::Semantic(format!("No field: {}", name.to_string())))
+                }
+            }
+            _ => Err(Error::Semantic(format!(
+                "Cannot access field of non-composit type: {:?}",
+                self
+            ))),
+        }
     }
 }
 
@@ -88,13 +129,7 @@ impl TypeTable {
                 signed: false,
             }),
         );
-        table.insert(
-            TypeRef::Long,
-            Rc::new(Type::Integer {
-                size: 8,
-                signed: true,
-            }),
-        );
+        table.insert(TypeRef::Long, Type::long());
         table.insert(
             TypeRef::ULong,
             Rc::new(Type::Integer {
@@ -107,7 +142,7 @@ impl TypeTable {
         TypeTable(table)
     }
 
-    fn get(&self, k: &TypeRef) -> Option<Rc<Type>> {
+    pub fn get(&self, k: &TypeRef) -> Option<Rc<Type>> {
         match k {
             TypeRef::Array { base, size } => Some(Rc::new(Type::Array {
                 base: self.get(base.as_ref())?,
@@ -229,7 +264,7 @@ pub fn resolve_types(ast: &mut Source) -> Result<TypeTable, Error> {
     Ok(type_table)
 }
 
-pub fn check_void(type_table: &TypeTable) -> Result<(), Error> {
+fn check_void(type_table: &TypeTable) -> Result<(), Error> {
     fn check(t: &Rc<Type>, type_table: &TypeTable) -> Result<(), Error> {
         let err = Err(Error::Semantic(format!("Invalid void in type")));
         match t.as_ref() {
@@ -261,7 +296,7 @@ pub fn check_void(type_table: &TypeTable) -> Result<(), Error> {
     Ok(())
 }
 
-pub fn check_duplication(type_table: &TypeTable) -> Result<(), Error> {
+fn check_duplication(type_table: &TypeTable) -> Result<(), Error> {
     for t in type_table.0.values() {
         match t.as_ref() {
             Type::Struct { members, name: _ } | Type::Union { members, name: _ } => {
@@ -283,7 +318,7 @@ pub fn check_duplication(type_table: &TypeTable) -> Result<(), Error> {
     Ok(())
 }
 
-pub fn check_recursive_definition(type_table: &TypeTable) -> Result<(), Error> {
+fn check_recursive_definition(type_table: &TypeTable) -> Result<(), Error> {
     type TypeSet = HashSet<Rc<Type>>;
     let mut mark = TypeSet::new();
     let mut done = TypeSet::new();

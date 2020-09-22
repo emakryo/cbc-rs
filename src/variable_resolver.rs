@@ -6,49 +6,57 @@ use std::rc::Rc;
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub enum Entity {
-    Variable { name: String },
-    Function { name: String },
+    Variable { name: String, type_: TypeRef },
+    Function { name: String, type_: TypeRef },
 }
 
 impl Entity {
-    fn var(name: String) -> Self {
-        Entity::Variable { name }
+    fn var(name: String, type_: TypeRef) -> Self {
+        Entity::Variable { name, type_ }
     }
 
-    fn func(name: String) -> Self {
-        Entity::Function { name }
+    fn func(name: String, type_: TypeRef) -> Self {
+        Entity::Function { name, type_ }
+    }
+
+    pub fn get_type(&self) -> &TypeRef {
+        match self {
+            Entity::Variable { name: _, type_ } | Entity::Function { name: _, type_ } => type_,
+        }
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct Type;
-
 #[derive(Debug)]
 pub struct GlobalScope {
-    types: HashMap<TypeRef, Type>,
     root: Rc<RefCell<LocalScope>>,
 }
 
 impl GlobalScope {
     fn new() -> Self {
         GlobalScope {
-            types: HashMap::new(),
             root: Rc::new(RefCell::new(LocalScope::root())),
         }
     }
 
-    fn add_variable(&mut self, name: String) -> Result<(), Error> {
-        self.root.borrow_mut().add_variable(name)
+    fn add_variable(&mut self, name: String, type_: TypeRef) -> Result<(), Error> {
+        self.root.borrow_mut().add_variable(name, type_)
     }
 
     fn add_function(
         &mut self,
         name: String,
+        return_type: TypeRef,
         params: Params,
     ) -> Result<Rc<RefCell<LocalScope>>, Error> {
+        let type_ = TypeRef::Function {
+            base: Box::new(return_type),
+            params: params.params.iter().map(|(t, _)| t.clone()).collect(),
+            variable_length: params.variable_length,
+        };
+
         self.root
             .borrow_mut()
-            .add_entity(name.clone(), Entity::func(name))?;
+            .add_entity(name.clone(), Entity::func(name, type_))?;
 
         let child = Rc::new(RefCell::new(LocalScope {
             entities: HashMap::new(),
@@ -58,8 +66,8 @@ impl GlobalScope {
 
         self.root.borrow_mut().children.push(Rc::clone(&child));
 
-        for (_, var) in params.params {
-            child.borrow_mut().add_variable(var.to_string())?;
+        for (type_, var) in params.params {
+            child.borrow_mut().add_variable(var.to_string(), type_)?;
         }
 
         Ok(child)
@@ -85,7 +93,15 @@ impl std::fmt::Debug for LocalScope {
 impl LocalScope {
     fn root() -> Self {
         let mut entities = HashMap::new();
-        entities.insert("NULL".into(), Rc::new(Entity::var("NULL".into())));
+        entities.insert(
+            "NULL".into(),
+            Rc::new(Entity::var(
+                "NULL".into(),
+                TypeRef::Pointer {
+                    base: Box::new(TypeRef::Void),
+                },
+            )),
+        );
         LocalScope {
             entities,
             children: Vec::new(),
@@ -105,8 +121,8 @@ impl LocalScope {
         }
     }
 
-    fn add_variable(&mut self, name: String) -> Result<(), Error> {
-        self.add_entity(name.clone(), Entity::var(name))
+    fn add_variable(&mut self, name: String, type_: TypeRef) -> Result<(), Error> {
+        self.add_entity(name.clone(), Entity::var(name, type_))
     }
 
     fn get_entity(&self, name: &str) -> Option<Rc<Entity>> {
@@ -141,11 +157,11 @@ pub fn resolve_variables(ast: &mut Source) -> Result<GlobalScope, Error> {
             match decl {
                 HeaderDecl::VarsDecl(vs) => {
                     for (name, _) in &vs.2 {
-                        global.add_variable(name.to_string())?;
+                        global.add_variable(name.to_string(), vs.1.clone())?;
                     }
                 }
-                HeaderDecl::FuncDecl(_, name, p) => {
-                    global.add_function(name.to_string(), p.clone())?;
+                HeaderDecl::FuncDecl(t, name, p) => {
+                    global.add_function(name.to_string(), t.clone(), p.clone())?;
                 }
                 HeaderDecl::TypeDef(_, _) => (),
                 d => todo!("{:?}", d),
@@ -155,19 +171,19 @@ pub fn resolve_variables(ast: &mut Source) -> Result<GlobalScope, Error> {
 
     for def in &mut ast.1 {
         match def {
-            TopDef::Defun(_, _, name, param, block) => {
-                let scope = global.add_function(name.to_string(), param.clone())?;
+            TopDef::Defun(_, t, name, param, block) => {
+                let scope = global.add_function(name.to_string(), t.clone(), param.clone())?;
                 block.set_scope(scope);
             }
             TopDef::DefVars(defs) => {
                 for (name, _) in &mut defs.2 {
-                    global.add_variable(name.to_string())?;
+                    global.add_variable(name.to_string(), defs.1.clone())?;
                 }
             }
             TopDef::DefStuct(_, _) | TopDef::DefUnion(_, _) | TopDef::TypeDef(_, _) => (),
             TopDef::DefConst(defs) => {
                 for (name, _) in &mut defs.2 {
-                    global.add_variable(name.to_string())?;
+                    global.add_variable(name.to_string(), defs.1.clone())?;
                 }
             }
         }
@@ -208,7 +224,9 @@ impl Block {
     fn resolve_variables(&mut self, scope: Rc<RefCell<LocalScope>>) -> Result<(), Error> {
         for vars in self.ref_vars() {
             for (var, _) in &vars.2 {
-                scope.borrow_mut().add_variable(var.to_string())?;
+                scope
+                    .borrow_mut()
+                    .add_variable(var.to_string(), vars.1.clone())?;
             }
         }
 
