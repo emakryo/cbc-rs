@@ -102,10 +102,7 @@ impl TypeTable {
                 signed: false,
             }),
         );
-        table.insert(
-            TypeRef::Void,
-            Rc::new(Type::Void),
-        );
+        table.insert(TypeRef::Void, Rc::new(Type::Void));
 
         TypeTable(table)
     }
@@ -125,7 +122,10 @@ impl TypeTable {
                 variable_length,
             } => Some(Rc::new(Type::Function {
                 base: self.get(base.as_ref())?,
-                params: params.iter().map(|p| self.get(p)).collect::<Option<Vec<_>>>()?,
+                params: params
+                    .iter()
+                    .map(|p| self.get(p))
+                    .collect::<Option<Vec<_>>>()?,
                 variable_length: *variable_length,
             })),
             k => self.0.get(k).map(Rc::clone),
@@ -152,8 +152,7 @@ impl TypeTable {
         Ok(())
     }
 
-    fn add_struct(&mut self, name: Ident, members: Vec<(TypeRef, Ident)>) -> Result<(), Error>
-    {
+    fn add_struct(&mut self, name: Ident, members: Vec<(TypeRef, Ident)>) -> Result<(), Error> {
         let typeref = TypeRef::Struct(name.clone());
         if self.0.contains_key(&typeref) {
             return Err(Error::Semantic(format!(
@@ -162,7 +161,13 @@ impl TypeTable {
             )));
         }
 
-        self.insert(typeref, Rc::new(Type::Struct{ name: name, members }));
+        self.insert(
+            typeref,
+            Rc::new(Type::Struct {
+                name: name,
+                members,
+            }),
+        );
         Ok(())
     }
 
@@ -175,9 +180,14 @@ impl TypeTable {
             )));
         }
 
-        self.insert(typeref, Rc::new(Type::Union{ name: name, members }));
+        self.insert(
+            typeref,
+            Rc::new(Type::Union {
+                name: name,
+                members,
+            }),
+        );
         Ok(())
-
     }
 }
 
@@ -223,12 +233,12 @@ pub fn check_void(type_table: &TypeTable) -> Result<(), Error> {
     fn check(t: &Rc<Type>, type_table: &TypeTable) -> Result<(), Error> {
         let err = Err(Error::Semantic(format!("Invalid void in type")));
         match t.as_ref() {
-            Type::Array { base , size: _} => {
+            Type::Array { base, size: _ } => {
                 if base.as_ref().is_void() {
                     return err;
                 }
-            },
-            Type::Struct { members, name: _ } | Type::Union { members, name: _ }=> {
+            }
+            Type::Struct { members, name: _ } | Type::Union { members, name: _ } => {
                 for (r, _) in members {
                     if let Some(t) = type_table.get(r) {
                         if t.as_ref().is_void() {
@@ -238,7 +248,7 @@ pub fn check_void(type_table: &TypeTable) -> Result<(), Error> {
                         return Err(Error::Semantic(format!("Unknown type: {:?}", r)));
                     }
                 }
-            },
+            }
             _ => (),
         }
         Ok(())
@@ -254,16 +264,19 @@ pub fn check_void(type_table: &TypeTable) -> Result<(), Error> {
 pub fn check_duplication(type_table: &TypeTable) -> Result<(), Error> {
     for t in type_table.0.values() {
         match t.as_ref() {
-            Type::Struct{ members , name: _ } | Type::Union { members, name: _ } => {
+            Type::Struct { members, name: _ } | Type::Union { members, name: _ } => {
                 let mut names = HashSet::new();
                 for (_, n) in members {
                     if names.contains(n) {
-                        return Err(Error::Semantic(format!("Duplicated field: {}", n.to_string())));
+                        return Err(Error::Semantic(format!(
+                            "Duplicated field: {}",
+                            n.to_string()
+                        )));
                     }
                     names.insert(n.clone());
                 }
             }
-            _ => ()
+            _ => (),
         }
     }
 
@@ -275,19 +288,27 @@ pub fn check_recursive_definition(type_table: &TypeTable) -> Result<(), Error> {
     let mut mark = TypeSet::new();
     let mut done = TypeSet::new();
 
-    fn rec(type_table: &TypeTable, mark: &mut TypeSet, done: &mut TypeSet, v: Rc<Type>) -> Result<(), Error> {
+    fn rec(
+        type_table: &TypeTable,
+        mark: &mut TypeSet,
+        done: &mut TypeSet,
+        v: Rc<Type>,
+    ) -> Result<(), Error> {
         if done.contains(&v) {
-            return Ok(())
+            return Ok(());
         }
 
         if mark.contains(&v) {
-            return Err(Error::Semantic(format!("Cyclic type definition found: {:?}", v)));
+            return Err(Error::Semantic(format!(
+                "Cyclic type definition found: {:?}",
+                v
+            )));
         }
 
         mark.insert(Rc::clone(&v));
 
         match v.as_ref() {
-            Type::Struct{ name: _, members } | Type::Union { name: _, members } => {
+            Type::Struct { name: _, members } | Type::Union { name: _, members } => {
                 for (typeref, _) in members {
                     if let Some(t) = type_table.get(typeref) {
                         rec(type_table, mark, done, t)?;
@@ -295,13 +316,13 @@ pub fn check_recursive_definition(type_table: &TypeTable) -> Result<(), Error> {
                         return Err(Error::Semantic(format!("Undefined type: {:?}", typeref)));
                     }
                 }
-            },
+            }
             Type::User(_, t) => {
-                rec(type_table, mark, done,  Rc::clone(t))?;
-            },
-            Type::Array{ base, size: _ } => {
+                rec(type_table, mark, done, Rc::clone(t))?;
+            }
+            Type::Array { base, size: _ } => {
                 rec(type_table, mark, done, Rc::clone(base))?;
-            },
+            }
             _ => (),
         }
 
@@ -313,7 +334,7 @@ pub fn check_recursive_definition(type_table: &TypeTable) -> Result<(), Error> {
     for v in type_table.0.values() {
         rec(type_table, &mut mark, &mut done, Rc::clone(v))?;
     }
-    
+
     Ok(())
 }
 

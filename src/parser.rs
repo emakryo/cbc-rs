@@ -20,14 +20,22 @@ fn keyword<'a, T: 'a, I: 'a, E: nom::error::ParseError<I>>(
     keyword: T,
 ) -> impl Fn(I) -> IResult<I, I, E>
 where
-    I: nom::InputIter + nom::InputTake + nom::Compare<T> + Clone + nom::InputTakeAtPosition + std::borrow::Borrow<str>,
+    I: nom::InputIter
+        + nom::InputTake
+        + nom::Compare<T>
+        + Clone
+        + nom::InputTakeAtPosition
+        + std::borrow::Borrow<str>,
     T: nom::InputLength + Clone,
     //<I as nom::InputTakeAtPosition>::Item: nom::AsChar,
 {
-    terminated(tag(keyword), peek(not(verify( take(1usize), |c: &str| {
-        let c = c.chars().next().unwrap();
-        c.is_ascii_alphanumeric() || c == '_'
-    }))))
+    terminated(
+        tag(keyword),
+        peek(not(verify(take(1usize), |c: &str| {
+            let c = c.chars().next().unwrap();
+            c.is_ascii_alphanumeric() || c == '_'
+        }))),
+    )
 }
 
 fn block_comment(i: &str) -> IResult<&str, ()> {
