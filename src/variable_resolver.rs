@@ -48,10 +48,12 @@ impl GlobalScope {
         return_type: TypeRef,
         params: Params,
     ) -> Result<Rc<RefCell<LocalScope>>, Error> {
-        let type_ = TypeRef::Function {
-            base: Box::new(return_type),
-            params: params.params.iter().map(|(t, _)| t.clone()).collect(),
-            variable_length: params.variable_length,
+        let type_ = TypeRef::Pointer {
+            base: Box::new(TypeRef::Function {
+                base: Box::new(return_type),
+                params: params.params.iter().map(|(t, _)| t.clone()).collect(),
+                variable_length: params.variable_length,
+            }),
         };
 
         self.root
@@ -92,16 +94,7 @@ impl std::fmt::Debug for LocalScope {
 
 impl LocalScope {
     fn root() -> Self {
-        let mut entities = HashMap::new();
-        entities.insert(
-            "NULL".into(),
-            Rc::new(Entity::var(
-                "NULL".into(),
-                TypeRef::Pointer {
-                    base: Box::new(TypeRef::Void),
-                },
-            )),
-        );
+        let entities = HashMap::new();
         LocalScope {
             entities,
             children: Vec::new(),
@@ -155,7 +148,7 @@ pub fn resolve_variables(ast: &mut Source) -> Result<GlobalScope, Error> {
     for decls in ast.0.values() {
         for decl in decls {
             match decl {
-                HeaderDecl::VarsDecl(vs) => {
+                HeaderDecl::VarsDecl(vs) | HeaderDecl::DefConst(vs) => {
                     for (name, _) in &vs.2 {
                         global.add_variable(name.to_string(), vs.1.clone())?;
                     }
@@ -222,11 +215,15 @@ pub fn resolve_variables(ast: &mut Source) -> Result<GlobalScope, Error> {
 
 impl Block {
     fn resolve_variables(&mut self, scope: Rc<RefCell<LocalScope>>) -> Result<(), Error> {
-        for vars in self.ref_vars() {
-            for (var, _) in &vars.2 {
+        for vars in self.mut_vars() {
+            for (var, init) in &mut vars.2 {
                 scope
                     .borrow_mut()
                     .add_variable(var.to_string(), vars.1.clone())?;
+
+                if let Some(init) = init.as_mut() {
+                    init.resolve_variables(Rc::clone(&scope))?;
+                }
             }
         }
 

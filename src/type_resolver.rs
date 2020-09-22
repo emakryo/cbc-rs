@@ -30,12 +30,39 @@ pub enum Type {
         name: Ident,
         members: Vec<(TypeRef, Ident)>,
     },
-    User(String, Rc<Type>),
 }
 
 impl Type {
     pub fn is_void(&self) -> bool {
         *self == Type::Void
+    }
+
+    pub fn is_pointer(&self) -> bool {
+        match self {
+            Type::Pointer { .. } => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_array(&self) -> bool {
+        match self {
+            Type::Array { .. } => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_function(&self) -> bool {
+        match self {
+            Type::Function { .. } => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_func_pointer(&self) -> bool {
+        match self {
+            Type::Pointer { base } => base.is_function(),
+            _ => false,
+        }
     }
 
     pub fn long() -> Rc<Self> {
@@ -351,9 +378,6 @@ fn check_recursive_definition(type_table: &TypeTable) -> Result<(), Error> {
                         return Err(Error::Semantic(format!("Undefined type: {:?}", typeref)));
                     }
                 }
-            }
-            Type::User(_, t) => {
-                rec(type_table, mark, done, Rc::clone(t))?;
             }
             Type::Array { base, size: _ } => {
                 rec(type_table, mark, done, Rc::clone(base))?;

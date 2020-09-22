@@ -226,6 +226,10 @@ impl Block {
         &self.vars
     }
 
+    pub fn mut_vars(&mut self) -> &mut Vec<DefVars> {
+        &mut self.vars
+    }
+
     pub fn ref_stmts(&self) -> &Vec<Statement> {
         &self.stmts
     }

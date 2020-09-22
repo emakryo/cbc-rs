@@ -871,11 +871,8 @@ pub fn parse_source<P: AsRef<Path>>(i: &str, import_paths: &[P]) -> Result<Sourc
             Ok((j, imp)) => {
                 if !imports.contains_key(&imp) {
                     let code = crate::library::load(&imp.lib_id, import_paths)?;
-                    let (def, mut ts) = header(&code, import_paths)?;
+                    let def = header(&code, import_paths, &mut imports, &mut types)?;
                     imports.insert(imp, def);
-                    for (k, v) in ts.drain() {
-                        types.insert(k, v);
-                    }
                 }
                 i = j;
             }
@@ -946,11 +943,11 @@ fn header_def<'a>(i: &'a str, types: &mut TypeMap) -> IResult<&'a str, HeaderDec
 fn header<P: AsRef<Path>>(
     i: &str,
     header_paths: &[P],
-) -> Result<(Vec<HeaderDecl>, TypeMap), Error> {
+    imports: &mut ImportMap,
+    types: &mut TypeMap,
+) -> Result<Vec<HeaderDecl>, Error> {
     let mut i = i;
     let mut defs = vec![];
-    let mut types = TypeMap::new();
-    let mut imports = HashMap::new();
 
     loop {
         i = sp(i)?.0;
@@ -958,12 +955,8 @@ fn header<P: AsRef<Path>>(
             Ok((j, imp)) => {
                 if !imports.contains_key(&imp) {
                     let code = crate::library::load(&imp.lib_id, header_paths)?;
-                    let (def, mut ts) = header(&code, header_paths)?;
+                    let def = header(&code, header_paths, imports, types)?;
                     imports.insert(imp, def);
-
-                    for (k, v) in ts.drain() {
-                        types.insert(k, v);
-                    }
                 }
                 i = j;
             }
@@ -975,13 +968,13 @@ fn header<P: AsRef<Path>>(
 
     loop {
         i = sp(i)?.0;
-        match header_def(i, &mut types) {
+        match header_def(i, types) {
             Ok((j, o)) => {
                 i = j;
                 defs.push(o);
             }
             Err(_) => match all_consuming(sp)(i) {
-                Ok((_, _)) => return Ok((defs, types)),
+                Ok((_, _)) => return Ok(defs),
                 Err(e) => return Err(e.into()),
             },
         }
@@ -1450,7 +1443,10 @@ main(int argc, char **argv)
                 header_paths.push(p.to_str().unwrap());
             }
 
-            let res = header(&code, &header_paths);
+            let mut imports = ImportMap::new();
+            let mut types = TypeMap::new();
+
+            let res = header(&code, &header_paths, &mut imports, &mut types);
             assert!(dbg!(res).is_ok(), "failed: {}", file_name.to_str().unwrap());
         }
     }

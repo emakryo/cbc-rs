@@ -156,7 +156,7 @@ impl Term {
 
     fn get_type(&self, type_table: &TypeTable) -> Result<Rc<Type>, Error> {
         match self {
-            Term::Unary(u) => u.as_ref().get_type(type_table),
+            Term::Unary(u) => u.get_type(type_table),
             Term::Cast(t, _) => {
                 if let Some(t) = type_table.get(t) {
                     Ok(t)
@@ -183,7 +183,15 @@ impl Unary {
                 for e in &a.0 {
                     e.check(type_table)?;
                 }
-                Ok(())
+                let t = u.get_type(type_table)?;
+                if t.is_func_pointer() {
+                    Ok(())
+                } else {
+                    Err(Error::Semantic(format!(
+                        "Function call to non-function variable: {:?}",
+                        self
+                    )))
+                }
             }
             Unary::Member(u, name) => {
                 let t = u.get_type(type_table)?;
@@ -208,7 +216,17 @@ impl Unary {
             Unary::Op(_, t) => t.check(type_table),
             Unary::ArrayRef(u, e) => {
                 u.check(type_table)?;
-                e.check(type_table)
+                e.check(type_table)?;
+
+                let t = u.get_type(type_table)?;
+                if t.is_pointer() || t.is_array() {
+                    Ok(())
+                } else {
+                    Err(Error::Semantic(format!(
+                        "Index access to non-array type: {:?}",
+                        self
+                    )))
+                }
             }
             Unary::Deref(t) => t.check(type_table),
             Unary::SizeofE(u) => u.check(type_table),
@@ -267,14 +285,15 @@ impl Unary {
             Unary::PostInc(u) | Unary::PostDec(u) => u.as_ref().get_type(type_table),
             Unary::Call(u, _) => {
                 let t = u.get_type(type_table)?;
-                if let Type::Function { base, .. } = t.as_ref() {
-                    Ok(Rc::clone(base))
-                } else {
-                    Err(Error::Semantic(format!(
-                        "Function call to non-function variable: {:?}",
-                        self
-                    )))
+                if let Type::Pointer { base } = t.as_ref() {
+                    if let Type::Function { base, .. } = base.as_ref() {
+                        return Ok(Rc::clone(base));
+                    }
                 }
+                Err(Error::Semantic(format!(
+                    "Function call to non-function variable: {:?}",
+                    self
+                )))
             }
             u => todo!("{:?}", u),
         }
@@ -293,10 +312,15 @@ impl Primary {
     fn get_type(&self, type_table: &TypeTable) -> Result<Rc<Type>, Error> {
         match self {
             Primary::Variable(v) => {
-                let entity = v.get_entity().expect("Entity must be resolved.");
+                let entity = if let Some(e) = v.get_entity() {
+                    e
+                } else {
+                    return Err(Error::Semantic(format!("Unresolved entity: {:?}", self)));
+                };
+                let t = entity.get_type();
                 Ok(type_table
-                    .get(entity.get_type())
-                    .expect("Type must be resolved."))
+                    .get(t)
+                    .expect(&format!("Type must be resolved: {:?}", t)))
             }
             Primary::Integer(_) => Ok(Type::long()),
             Primary::Character(_) => Ok(Type::char()),
@@ -321,6 +345,7 @@ mod tests {
 
         for file_name in glob::glob(&format!("{}/cbc-1.0/test/*.cb", root)).unwrap() {
             let file_name = file_name.unwrap();
+            //let file_name: std::path::PathBuf = "/home/user/std_compiler/cbc-rs/cbc-1.0/test/usertype.cb".into();
             dbg!(&file_name);
             let mut code = String::new();
             std::fs::File::open(&file_name)
@@ -348,6 +373,7 @@ mod tests {
             if verdict.is_err() {
                 dbg!(verdict).ok();
             }
+            //break;
         }
     }
 }
