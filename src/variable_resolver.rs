@@ -310,61 +310,32 @@ impl Expr {
                 resolve!(e1.as_mut());
                 resolve!(e2.as_mut());
             }
-            Expr::Term(t) => resolve!(t),
             Expr::Ternary(c, e1, e2) => {
                 resolve!(c.as_mut());
                 resolve!(e1.as_mut());
                 resolve!(e2.as_mut());
             }
-        }
-        Ok(())
-    }
-}
-
-impl Term {
-    fn resolve_variables(&mut self, scope: Rc<RefCell<LocalScope>>) -> Result<(), Error> {
-        macro_rules! resolve {
-            ($e:expr) => {
-                $e.resolve_variables(Rc::clone(&scope))?;
-            };
-        }
-        match self {
-            Term::Unary(u) => resolve!(u.as_mut()),
-            Term::Cast(_, t) => resolve!(t.as_mut()),
-        }
-        Ok(())
-    }
-}
-
-impl Unary {
-    fn resolve_variables(&mut self, scope: Rc<RefCell<LocalScope>>) -> Result<(), Error> {
-        macro_rules! resolve {
-            ($e:expr) => {
-                $e.resolve_variables(Rc::clone(&scope))?;
-            };
-        }
-
-        match self {
-            Unary::Call(e, a) => {
+            Expr::Cast(_, t) => resolve!(t.as_mut()),
+            Expr::Call(e, a) => {
                 resolve!(e.as_mut());
                 resolve!(a);
             }
-            Unary::Primary(p) => resolve!(p),
-            Unary::Member(e, _) => resolve!(e.as_mut()),
-            Unary::PMember(e, _) => resolve!(e.as_mut()),
-            Unary::Addr(e) => resolve!(e.as_mut()),
-            Unary::PostInc(e) => resolve!(e.as_mut()),
-            Unary::PostDec(e) => resolve!(e.as_mut()),
-            Unary::Op(_, e) => resolve!(e.as_mut()),
-            Unary::ArrayRef(e, i) => {
+            Expr::Primary(p) => resolve!(p),
+            Expr::Member(e, _) => resolve!(e.as_mut()),
+            Expr::PMember(e, _) => resolve!(e.as_mut()),
+            Expr::Addr(e) => resolve!(e.as_mut()),
+            Expr::PostInc(e) => resolve!(e.as_mut()),
+            Expr::PostDec(e) => resolve!(e.as_mut()),
+            Expr::Op(_, e) => resolve!(e.as_mut()),
+            Expr::ArrayRef(e, i) => {
                 resolve!(e.as_mut());
                 resolve!(i.as_mut());
             }
-            Unary::Deref(e) => resolve!(e.as_mut()),
-            Unary::PreInc(e) => resolve!(e.as_mut()),
-            Unary::PreDec(e) => resolve!(e.as_mut()),
-            Unary::SizeofE(e) => resolve!(e.as_mut()),
-            Unary::SizeofT(_) => (),
+            Expr::Deref(e) => resolve!(e.as_mut()),
+            Expr::PreInc(e) => resolve!(e.as_mut()),
+            Expr::PreDec(e) => resolve!(e.as_mut()),
+            Expr::SizeofE(e) => resolve!(e.as_mut()),
+            Expr::SizeofT(_) => (),
         }
         Ok(())
     }

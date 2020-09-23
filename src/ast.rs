@@ -83,30 +83,6 @@ pub enum TypeRef {
 }
 
 #[derive(Debug, Eq, PartialEq, Clone)]
-pub enum Term {
-    Unary(Box<Unary>),
-    Cast(TypeRef, Box<Term>),
-}
-
-#[derive(Debug, Eq, PartialEq, Clone)]
-pub enum Unary {
-    PreInc(Box<Unary>),
-    PreDec(Box<Unary>),
-    Op(UnaryOp, Box<Term>),
-    Deref(Box<Term>),
-    Addr(Box<Term>),
-    SizeofT(TypeRef),
-    SizeofE(Box<Unary>),
-    PostInc(Box<Unary>),
-    PostDec(Box<Unary>),
-    ArrayRef(Box<Unary>, Box<Expr>),
-    Member(Box<Unary>, Ident),
-    PMember(Box<Unary>, Ident),
-    Call(Box<Unary>, Args),
-    Primary(Primary),
-}
-
-#[derive(Debug, Eq, PartialEq, Clone)]
 pub enum UnaryOp {
     Plus,
     Minus,
@@ -120,7 +96,7 @@ pub enum Primary {
     Character(Character),
     String(String_),
     Variable(Variable),
-    Expr(Expr),
+    Expr(Box<Expr>),
 }
 
 #[derive(Debug, Eq, PartialEq, Clone)]
@@ -152,11 +128,25 @@ pub struct Args(pub Vec<Expr>);
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub enum Expr {
-    Assign(Term, Box<Expr>),
-    AssignOp(Term, AssignOp, Box<Expr>),
+    Assign(Box<Expr>, Box<Expr>),
+    AssignOp(Box<Expr>, AssignOp, Box<Expr>),
     Ternary(Box<Expr>, Box<Expr>, Box<Expr>),
     BinOp(BinOp, Box<Expr>, Box<Expr>),
-    Term(Term),
+    Cast(TypeRef, Box<Expr>),
+    PreInc(Box<Expr>),
+    PreDec(Box<Expr>),
+    Op(UnaryOp, Box<Expr>),
+    Deref(Box<Expr>),
+    Addr(Box<Expr>),
+    SizeofT(TypeRef),
+    SizeofE(Box<Expr>),
+    PostInc(Box<Expr>),
+    PostDec(Box<Expr>),
+    ArrayRef(Box<Expr>, Box<Expr>),
+    Member(Box<Expr>, Ident),
+    PMember(Box<Expr>, Ident),
+    Call(Box<Expr>, Args),
+    Primary(Primary),
 }
 
 #[derive(Debug, Eq, PartialEq, Clone)]

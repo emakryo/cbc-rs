@@ -38,10 +38,7 @@ impl Type {
     }
 
     pub fn is_pointer(&self) -> bool {
-        match self {
-            Type::Pointer { .. } => true,
-            _ => false,
-        }
+        self.pointer_base().is_some()
     }
 
     pub fn is_array(&self) -> bool {
@@ -59,9 +56,60 @@ impl Type {
     }
 
     pub fn is_func_pointer(&self) -> bool {
+        self.return_type().is_some()
+    }
+
+    pub fn pointer_base(&self) -> Option<Rc<Self>> {
         match self {
-            Type::Pointer { base } => base.is_function(),
-            _ => false,
+            Type::Pointer { base } => Some(Rc::clone(base)),
+            _ => None,
+        }
+    }
+
+    pub fn return_type(&self) -> Option<Rc<Self>> {
+        match self.pointer_base()?.as_ref() {
+            Type::Function { base, .. } => Some(Rc::clone(base)),
+            _ => None,
+        }
+    }
+
+    pub fn args_types(&self) -> Option<Vec<Rc<Self>>> {
+        match self.pointer_base()?.as_ref() {
+            Type::Function { params, .. } => Some(params.iter().cloned().collect()),
+            _ => None,
+        }
+    }
+
+    pub fn to_typeref(&self) -> TypeRef {
+        match self {
+            Type::Void => TypeRef::Void,
+            Type::Array { base, size } => TypeRef::Array {
+                base: Box::new(base.to_typeref()),
+                size: *size,
+            },
+            Type::Function {
+                base,
+                params,
+                variable_length,
+            } => TypeRef::Function {
+                base: Box::new(base.to_typeref()),
+                params: params.iter().map(|t| t.to_typeref()).collect(),
+                variable_length: *variable_length,
+            },
+            Type::Pointer { base } => TypeRef::Pointer {
+                base: Box::new(base.to_typeref()),
+            },
+            Type::Struct { name, .. } => TypeRef::Struct(name.clone()),
+            Type::Union { name, .. } => TypeRef::Union(name.clone()),
+            i if i == Self::long().as_ref() => TypeRef::Long,
+            i if i == Self::ulong().as_ref() => TypeRef::ULong,
+            i if i == Self::int().as_ref() => TypeRef::Int,
+            i if i == Self::uint().as_ref() => TypeRef::UInt,
+            i if i == Self::short().as_ref() => TypeRef::Short,
+            i if i == Self::ushort().as_ref() => TypeRef::UShort,
+            i if i == Self::char().as_ref() => TypeRef::Char,
+            i if i == Self::uchar().as_ref() => TypeRef::UChar,
+            _ => panic!("Unknow type"),
         }
     }
 
@@ -72,7 +120,49 @@ impl Type {
         })
     }
 
+    pub fn ulong() -> Rc<Self> {
+        Rc::new(Type::Integer {
+            size: 8,
+            signed: false,
+        })
+    }
+
+    pub fn int() -> Rc<Self> {
+        Rc::new(Type::Integer {
+            size: 4,
+            signed: true,
+        })
+    }
+
+    pub fn uint() -> Rc<Self> {
+        Rc::new(Type::Integer {
+            size: 4,
+            signed: false,
+        })
+    }
+
+    pub fn short() -> Rc<Self> {
+        Rc::new(Type::Integer {
+            size: 2,
+            signed: true,
+        })
+    }
+
+    pub fn ushort() -> Rc<Self> {
+        Rc::new(Type::Integer {
+            size: 2,
+            signed: false,
+        })
+    }
+
     pub fn char() -> Rc<Self> {
+        Rc::new(Type::Integer {
+            size: 1,
+            signed: true,
+        })
+    }
+
+    pub fn uchar() -> Rc<Self> {
         Rc::new(Type::Integer {
             size: 1,
             signed: false,
@@ -114,56 +204,14 @@ impl TypeTable {
     fn new() -> Self {
         let mut table = HashMap::new();
 
-        table.insert(
-            TypeRef::Char,
-            Rc::new(Type::Integer {
-                size: 1,
-                signed: false,
-            }),
-        );
-        table.insert(
-            TypeRef::UChar,
-            Rc::new(Type::Integer {
-                size: 1,
-                signed: false,
-            }),
-        );
-        table.insert(
-            TypeRef::Short,
-            Rc::new(Type::Integer {
-                size: 4,
-                signed: true,
-            }),
-        );
-        table.insert(
-            TypeRef::UShort,
-            Rc::new(Type::Integer {
-                size: 4,
-                signed: false,
-            }),
-        );
-        table.insert(
-            TypeRef::Int,
-            Rc::new(Type::Integer {
-                size: 4,
-                signed: true,
-            }),
-        );
-        table.insert(
-            TypeRef::UInt,
-            Rc::new(Type::Integer {
-                size: 4,
-                signed: false,
-            }),
-        );
+        table.insert(TypeRef::Char, Type::char());
+        table.insert(TypeRef::UChar, Type::uchar());
+        table.insert(TypeRef::Short, Type::short());
+        table.insert(TypeRef::UShort, Type::ushort());
+        table.insert(TypeRef::Int, Type::int());
+        table.insert(TypeRef::UInt, Type::uint());
         table.insert(TypeRef::Long, Type::long());
-        table.insert(
-            TypeRef::ULong,
-            Rc::new(Type::Integer {
-                size: 8,
-                signed: false,
-            }),
-        );
+        table.insert(TypeRef::ULong, Type::ulong());
         table.insert(TypeRef::Void, Rc::new(Type::Void));
 
         TypeTable(table)

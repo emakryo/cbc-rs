@@ -244,7 +244,7 @@ fn typeref<'a>(i: &'a str, types: &'_ TypeMap) -> IResult<&'a str, TypeRef> {
     )(i)
 }
 
-fn term<'a>(i: &'a str, types: &'_ TypeMap) -> IResult<&'a str, Term> {
+fn term<'a>(i: &'a str, types: &'_ TypeMap) -> IResult<&'a str, Expr> {
     alt((
         map(
             tuple((
@@ -255,9 +255,9 @@ fn term<'a>(i: &'a str, types: &'_ TypeMap) -> IResult<&'a str, Term> {
                 ),
                 preceded(sp, |i: &'a str| term(i, types)),
             )),
-            |(ty, tm)| Term::Cast(ty, Box::new(tm)),
+            |(ty, tm)| Expr::Cast(ty, Box::new(tm)),
         ),
-        map(|i| unary(i, types), |u| Term::Unary(Box::new(u))),
+        |i| unary(i, types),
     ))(i)
 }
 
@@ -281,24 +281,24 @@ pub enum Postfix {
     Call(Args),
 }
 
-fn unary<'a>(i: &'a str, types: &'_ TypeMap) -> IResult<&'a str, Unary> {
+fn unary<'a>(i: &'a str, types: &'_ TypeMap) -> IResult<&'a str, Expr> {
     let unary = |i: &'a str| unary(i, types);
     let term = |i: &'a str| term(i, types);
     alt((
         map(preceded(tag("++"), preceded(sp, unary)), |u| {
-            Unary::PreInc(Box::new(u))
+            Expr::PreInc(Box::new(u))
         }),
         map(preceded(tag("--"), preceded(sp, unary)), |u| {
-            Unary::PreDec(Box::new(u))
+            Expr::PreDec(Box::new(u))
         }),
         map(tuple((unary_op, preceded(sp, term))), |(op, t)| {
-            Unary::Op(op, Box::new(t))
+            Expr::Op(op, Box::new(t))
         }),
         map(preceded(char('*'), preceded(sp, term)), |t| {
-            Unary::Deref(Box::new(t))
+            Expr::Deref(Box::new(t))
         }),
         map(preceded(char('&'), preceded(sp, term)), |t| {
-            Unary::Addr(Box::new(t))
+            Expr::Addr(Box::new(t))
         }),
         map(
             preceded(
@@ -309,21 +309,21 @@ fn unary<'a>(i: &'a str, types: &'_ TypeMap) -> IResult<&'a str, Unary> {
                     preceded(sp, char(')')),
                 ),
             ),
-            |t| Unary::SizeofT(t),
+            |t| Expr::SizeofT(t),
         ),
         map(preceded(keyword("sizeof"), preceded(sp, unary)), |u| {
-            Unary::SizeofE(Box::new(u))
+            Expr::SizeofE(Box::new(u))
         }),
         map(
             tuple((|i| primary(i, types), many0(|i| postfix(i, types)))),
             |(pr, pfs)| {
-                pfs.into_iter().fold(Unary::Primary(pr), |u, pf| match pf {
-                    Postfix::Inc => Unary::PostInc(Box::new(u)),
-                    Postfix::Dec => Unary::PostDec(Box::new(u)),
-                    Postfix::ArrayRef(e) => Unary::ArrayRef(Box::new(u), e),
-                    Postfix::Member(n) => Unary::Member(Box::new(u), n),
-                    Postfix::PMember(n) => Unary::PMember(Box::new(u), n),
-                    Postfix::Call(a) => Unary::Call(Box::new(u), a),
+                pfs.into_iter().fold(Expr::Primary(pr), |u, pf| match pf {
+                    Postfix::Inc => Expr::PostInc(Box::new(u)),
+                    Postfix::Dec => Expr::PostDec(Box::new(u)),
+                    Postfix::ArrayRef(e) => Expr::ArrayRef(Box::new(u), e),
+                    Postfix::Member(n) => Expr::Member(Box::new(u), n),
+                    Postfix::PMember(n) => Expr::PMember(Box::new(u), n),
+                    Postfix::Call(a) => Expr::Call(Box::new(u), a),
                 })
             },
         ),
@@ -371,7 +371,7 @@ fn primary<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Primary> {
                 preceded(sp, |i| expr(i, types)),
                 preceded(sp, char(')')),
             ),
-            Primary::Expr,
+            |e| Primary::Expr(Box::new(e)),
         ),
     ))(i)
 }
@@ -412,7 +412,7 @@ fn expr<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Expr> {
                 preceded(sp, char('=')),
                 preceded(sp, |i| expr(i, types)),
             ),
-            |(t, e)| Expr::Assign(t, Box::new(e)),
+            |(t, e)| Expr::Assign(Box::new(t), Box::new(e)),
         ),
         map(
             tuple((
@@ -420,7 +420,7 @@ fn expr<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Expr> {
                 preceded(sp, assign_op),
                 preceded(sp, |i| expr(i, types)),
             )),
-            |(t, a, e)| Expr::AssignOp(t, a, Box::new(e)),
+            |(t, a, e)| Expr::AssignOp(Box::new(t), a, Box::new(e)),
         ),
         |i| expr10(i, types),
     ))(i)
@@ -596,11 +596,11 @@ fn expr1<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Expr> {
             ))),
         )),
         |(e1, e2)| match e2 {
-            Some(("*", e2)) => Expr::BinOp(BinOp::Mul, Box::new(Expr::Term(e1)), Box::new(e2)),
-            Some(("/", e2)) => Expr::BinOp(BinOp::Div, Box::new(Expr::Term(e1)), Box::new(e2)),
-            Some(("%", e2)) => Expr::BinOp(BinOp::Mod, Box::new(Expr::Term(e1)), Box::new(e2)),
+            Some(("*", e2)) => Expr::BinOp(BinOp::Mul, Box::new(e1), Box::new(e2)),
+            Some(("/", e2)) => Expr::BinOp(BinOp::Div, Box::new(e1), Box::new(e2)),
+            Some(("%", e2)) => Expr::BinOp(BinOp::Mod, Box::new(e1), Box::new(e2)),
             Some(_) => unimplemented!(),
-            None => Expr::Term(e1),
+            None => e1,
         },
     )(i)
 }
@@ -1151,8 +1151,8 @@ mod test {
             term("++x"),
             Ok((
                 "",
-                Term::Unary(Box::new(Unary::PreInc(Box::new(Unary::Primary(
-                    Primary::Variable(Variable::new(Ident("x".into())))
+                Expr::PreInc(Box::new(Expr::Primary(Primary::Variable(Variable::new(
+                    Ident("x".into())
                 )))))
             ))
         );
@@ -1160,8 +1160,8 @@ mod test {
             term("x--"),
             Ok((
                 "",
-                Term::Unary(Box::new(Unary::PostDec(Box::new(Unary::Primary(
-                    Primary::Variable(Variable::new(Ident("x".into())))
+                Expr::PostDec(Box::new(Expr::Primary(Primary::Variable(Variable::new(
+                    Ident("x".into())
                 )))))
             ))
         );
@@ -1169,10 +1169,7 @@ mod test {
             term("(int)sizeof(short)"),
             Ok((
                 "",
-                Term::Cast(
-                    TypeRef::Int,
-                    Box::new(Term::Unary(Box::new(Unary::SizeofT(TypeRef::Short)))),
-                )
+                Expr::Cast(TypeRef::Int, Box::new(Expr::SizeofT(TypeRef::Short)),)
             ))
         );
 
@@ -1180,15 +1177,15 @@ mod test {
             term("foo.bar->baz"),
             Ok((
                 "",
-                Term::Unary(Box::new(Unary::PMember(
-                    Box::new(Unary::Member(
-                        Box::new(Unary::Primary(Primary::Variable(Variable::new(Ident(
+                Expr::PMember(
+                    Box::new(Expr::Member(
+                        Box::new(Expr::Primary(Primary::Variable(Variable::new(Ident(
                             "foo".into()
                         ))))),
                         Ident("bar".into()),
                     )),
                     Ident("baz".into()),
-                )))
+                )
             ))
         );
     }
