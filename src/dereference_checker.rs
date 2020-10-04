@@ -1,9 +1,8 @@
 use crate::ast::*;
 use crate::error::Error;
-use crate::type_resolver::{Type, TypeTable};
-use std::rc::Rc;
+use crate::types::{TypeCell, TypeTable};
 
-pub fn check_dereference(ast: &Source, type_table: &TypeTable) -> Result<(), Error> {
+pub fn check_dereference<'a>(ast: &Source, type_table: &'a TypeTable<'a>) -> Result<(), Error> {
     for defs in &ast.1 {
         match defs {
             TopDef::DefVars(DefVars(_, _, defs)) | TopDef::DefConst(DefVars(_, _, defs)) => {
@@ -29,7 +28,7 @@ pub fn check_dereference(ast: &Source, type_table: &TypeTable) -> Result<(), Err
 }
 
 impl Statement {
-    fn check_deref(&self, type_table: &TypeTable) -> Result<(), Error> {
+    fn check_deref<'a>(&self, type_table: &'a TypeTable<'a>) -> Result<(), Error> {
         match self {
             Statement::Expr(e) => e.check_deref(type_table),
             Statement::Block(b) => b.check_deref(type_table),
@@ -73,7 +72,7 @@ impl Statement {
 }
 
 impl Block {
-    fn check_deref(&self, type_table: &TypeTable) -> Result<(), Error> {
+    fn check_deref<'a>(&self, type_table: &'a TypeTable<'a>) -> Result<(), Error> {
         for vars in self.ref_vars() {
             for (_, expr) in &vars.2 {
                 if let Some(expr) = expr {
@@ -90,7 +89,7 @@ impl Block {
 }
 
 impl Expr {
-    fn check_deref(&self, type_table: &TypeTable) -> Result<(), Error> {
+    fn check_deref<'a>(&self, type_table: &'a TypeTable<'a>) -> Result<(), Error> {
         match self {
             Expr::Assign(t, e) | Expr::AssignOp(t, _, e) => {
                 if !t.is_assignable(type_table)? {
@@ -129,19 +128,16 @@ impl Expr {
             }
             Expr::Member(e, name) => {
                 let t = e.get_type(type_table)?;
-                t.get_field_type(name, type_table)?;
+                t.get_field(name)?;
             }
             Expr::PMember(e, name) => {
-                let t = e.get_type(type_table)?;
-                let t = if let Type::Pointer { base } = t.as_ref() {
-                    base
-                } else {
-                    return Err(Error::Semantic(format!(
+                e.get_type(type_table)?
+                    .pointer_base()
+                    .ok_or(Error::Semantic(format!(
                         "Arrow operator for non-pointer value: {:?}",
                         self
-                    )));
-                };
-                t.get_field_type(name, type_table)?;
+                    )))?
+                    .get_field(name)?;
             }
             Expr::Addr(e) => e.check_deref(type_table)?,
             Expr::Primary(_) => (),
@@ -172,20 +168,17 @@ impl Expr {
         }
     }
 
-    fn is_assignable(&self, type_table: &TypeTable) -> Result<bool, Error> {
+    fn is_assignable<'a>(&self, type_table: &'a TypeTable<'a>) -> Result<bool, Error> {
         let t = self.get_type(type_table)?;
-        Ok(match t.as_ref() {
-            Type::Array { .. } | Type::Function { .. } => false,
-            _ => true,
-        })
+        Ok(!t.is_array() && !t.is_function())
     }
 
-    fn get_type(&self, type_table: &TypeTable) -> Result<Rc<Type>, Error> {
+    pub fn get_type<'a>(&self, type_table: &TypeTable<'a>) -> Result<TypeCell<'a>, Error> {
         match self {
             Expr::BinOp(_, e, _) => e.get_type(type_table),
             Expr::Cast(t, _) => {
                 if let Some(t) = type_table.get(t) {
-                    Ok(t)
+                    Ok(t.clone())
                 } else {
                     Err(Error::Semantic(format!("Invalid type: {:?}", t)))
                 }
@@ -193,27 +186,27 @@ impl Expr {
             Expr::Primary(p) => p.get_type(type_table),
             Expr::ArrayRef(e, _) => {
                 let t = e.get_type(type_table)?;
-                if let Type::Array { base, .. } = t.as_ref() {
-                    return Ok(Rc::clone(base));
+                if let Some(base) = t.array_base() {
+                    return Ok(base);
                 }
                 Err(Error::Semantic(format!("Invalid index access: {:?}", self)))
             }
             Expr::Deref(e) => {
                 let t = e.get_type(type_table)?;
-                if let Type::Pointer { base } = t.as_ref() {
-                    return Ok(Rc::clone(base));
+                if let Some(base) = t.pointer_base() {
+                    return Ok(base);
                 }
 
                 Err(Error::Semantic(format!("Invalid dereference: {:?}", self)))
             }
             Expr::Member(e, name) => {
                 let t = e.get_type(type_table)?;
-                t.get_field_type(name, type_table)
+                t.get_field(name)
             }
             Expr::PMember(e, name) => {
                 let t = e.get_type(type_table)?;
-                if let Type::Pointer { base } = t.as_ref() {
-                    base.get_field_type(name, type_table)
+                if let Some(base) = t.pointer_base() {
+                    base.get_field(name)
                 } else {
                     Err(Error::Semantic(format!(
                         "Arrow access to non-pointer value: {:?}",
@@ -224,9 +217,9 @@ impl Expr {
             Expr::PostInc(e) | Expr::PostDec(e) => e.as_ref().get_type(type_table),
             Expr::Call(e, _) => {
                 let t = e.get_type(type_table)?;
-                if let Type::Pointer { base } = t.as_ref() {
-                    if let Type::Function { base, .. } = base.as_ref() {
-                        return Ok(Rc::clone(base));
+                if let Some(base) = t.pointer_base() {
+                    if let Some(base) = base.return_type() {
+                        return Ok(base);
                     }
                 }
                 Err(Error::Semantic(format!(
@@ -248,7 +241,7 @@ impl Primary {
         }
     }
 
-    fn get_type(&self, type_table: &TypeTable) -> Result<Rc<Type>, Error> {
+    pub fn get_type<'a>(&self, type_table: &TypeTable<'a>) -> Result<TypeCell<'a>, Error> {
         match self {
             Primary::Variable(v) => {
                 let entity = if let Some(e) = v.get_entity() {
@@ -259,11 +252,12 @@ impl Primary {
                 let t = entity.get_type();
                 Ok(type_table
                     .get(t)
-                    .expect(&format!("Type must be resolved: {:?}", t)))
+                    .expect(&format!("Type must be resolved: {:?}", t))
+                    .clone())
             }
-            Primary::Integer(_) => Ok(Type::long()),
-            Primary::Character(_) => Ok(Type::char()),
-            Primary::String(_) => Ok(Type::string()),
+            Primary::Integer(_) => Ok(type_table.long()),
+            Primary::Character(_) => Ok(type_table.char()),
+            Primary::String(_) => Ok(type_table.string()),
             Primary::Expr(e) => e.get_type(type_table),
         }
     }
@@ -301,7 +295,8 @@ mod tests {
                 dbg!(scope).ok();
                 continue;
             }
-            let table = resolve_types(&mut ast);
+            let arena = crate::types::TypeArena::new();
+            let table = resolve_types(&mut ast, &arena);
             if table.is_err() {
                 dbg!(table).ok();
                 continue;

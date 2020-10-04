@@ -1,6 +1,7 @@
 use crate::ast::*;
 use crate::error::Error;
 use crate::type_resolver::{Type, TypeTable};
+use std::rc::Rc;
 
 pub fn check_type(ast: &mut Source, type_table: &TypeTable) -> Result<(), Error> {
     for def in &mut ast.1 {
@@ -18,8 +19,14 @@ pub fn check_type(ast: &mut Source, type_table: &TypeTable) -> Result<(), Error>
     Ok(())
 }
 
-fn implicit_conversion(lhs: &TypeRef, rhs: &TypeRef) -> TypeRef {
-    todo!()
+fn implicit_conversion(lhs: Rc<Type>, rhs: Rc<Type>) -> Result<Rc<Type>, Error> {
+    match (lhs.as_ref(), rhs.as_ref()) {
+        (Type::Integer { size: lsize, signed: lsigned }, Type::Integer { size: rsize, signed: rsigned }) => {
+            Ok(Rc::new(Type::Integer { size: *lsize.max(rsize), signed: *rsigned || *lsigned }))
+        }
+        (l, r) if l == r => Ok(lhs),
+        _ => Err(Error::Semantic("Failed implicit conversion".into())),
+    }
 }
 
 impl Block {
@@ -56,6 +63,11 @@ impl Statement {
             Statement::Expr(e) => {
                 e.check_type(type_table)?;
             }
+            Statement::Return(e) => {
+                if let Some(e) = e {
+                    e.check_type(type_table)?;
+                }
+            }
             s => todo!("{:?}", s),
         }
 
@@ -68,9 +80,7 @@ impl Expr {
         match self {
             Expr::Primary(p) => p.check_type(type_table),
             Expr::Call(e, args) => {
-                let t = type_table
-                    .get(&e.check_type(type_table)?)
-                    .ok_or(Error::Semantic("Type not found".into()))?;
+                let t = e.get_type(type_table)?;
 
                 if let Type::Function {
                     base,
@@ -94,10 +104,7 @@ impl Expr {
                     }
 
                     for (t, e) in params.iter().zip(args.0.iter_mut()) {
-                        let tref = e.check_type(type_table)?;
-                        let u = type_table
-                            .get(&tref)
-                            .ok_or(Error::Semantic(format!("Type not found: {:?}", tref)))?;
+                        let u = e.get_type(type_table)?;
                         if *t != u {
                             e.cast_to(t.to_typeref())?;
                         }
@@ -108,6 +115,41 @@ impl Expr {
                         "Function call to non function pointer".into(),
                     ))
                 }
+            }
+            Expr::Assign(d, e) | Expr::AssignOp(d, _, e) => {
+                d.check_type();
+                e.check_type();
+                let td = d.get_type(type_table)?;
+                let te = e.get_type(type_table)?;
+
+                if te != td {
+                    e.cast_to(td.to_typeref())?;
+                }
+                Ok(td.to_typeref())
+            }
+            Expr::BinOp(_, e1, e2) => {
+                let t1 = e1.get_type(type_table)?;
+                let t2 = e2.get_type(type_table)?;
+
+                if t1 != t2 {
+                    let tt = implicit_conversion(Rc::clone(&t1), Rc::clone(&t2))?;
+                    if tt != t1 {
+                        e1.cast_to(tt.to_typeref())?;
+                    }
+                    if tt != t2 {
+                        e2.cast_to(tt.to_typeref())?;
+                    }
+                    Ok(tt.to_typeref())
+                } else {
+                    Ok(t1.to_typeref())
+                }
+            }
+            Expr::Member(e, f) => {
+                let t = e.get_type(type_table)?;
+                Ok(t.get_field_type(f, type_table)?.to_typeref())
+            }
+            Expr::Addr(e) => {
+                Ok(TypeRef::Pointer { base: Box::new(type_table.get(k)) })
             }
             e => todo!("{:?}", e),
         }

@@ -1,5 +1,6 @@
 use crate::ast::*;
 use crate::error::Error;
+use crate::types::TypeRef;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;

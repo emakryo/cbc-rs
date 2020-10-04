@@ -1,3 +1,4 @@
+use crate::types::TypeRef;
 use crate::variable_resolver::{Entity, LocalScope};
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -52,34 +53,6 @@ pub enum TypeOpt {
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct Storage {
     pub static_: bool,
-}
-
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
-pub enum TypeRef {
-    Array {
-        base: Box<TypeRef>,
-        size: Option<usize>,
-    },
-    Function {
-        base: Box<TypeRef>,
-        params: Vec<TypeRef>,
-        variable_length: bool,
-    },
-    Char,
-    UChar,
-    Short,
-    UShort,
-    Int,
-    UInt,
-    Long,
-    ULong,
-    Pointer {
-        base: Box<TypeRef>,
-    },
-    Struct(Ident),
-    Union(Ident),
-    User(Ident),
-    Void,
 }
 
 #[derive(Debug, Eq, PartialEq, Clone)]

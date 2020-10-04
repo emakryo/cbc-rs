@@ -13,6 +13,7 @@ structopt = { version = "0.3", features = ["paw"] }
 anyhow = "1.0"
 paw = "1.0"
 thiserror = "1.0"
+typed-arena = "2.0"
 
 [dev-dependencies]
 
