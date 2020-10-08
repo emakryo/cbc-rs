@@ -13,11 +13,21 @@ pub fn resolve_types<'a>(
         for decl in decls {
             match decl {
                 HeaderDecl::TypeDef(typeref, n) => {
-                    type_table.add_usertype(&arena, n.clone(), typeref.clone())?;
+                    type_table.add_usertype(n.clone(), typeref.clone())?;
                 }
                 HeaderDecl::DefStuct(_, _) => todo!(),
                 HeaderDecl::DefUnion(_, _) => todo!(),
-                _ => (),
+                HeaderDecl::FuncDecl(typeref, ..) => {
+                    type_table.add(typeref.clone())?;
+                },
+                HeaderDecl::VarsDecl(def) | HeaderDecl::DefConst(def) => {
+                    type_table.add(def.1.clone())?;
+                    for (_, e) in &def.2 {
+                        if let Some(e) = e {
+                            e.resolve_types(&mut type_table)?;
+                        }
+                    }
+                }
             }
         }
     }
@@ -25,15 +35,29 @@ pub fn resolve_types<'a>(
     for def in &ast.1 {
         match def {
             TopDef::TypeDef(typeref, n) => {
-                type_table.add_usertype(arena, n.clone(), typeref.clone())?;
+                type_table.add_usertype(n.clone(), typeref.clone())?;
             }
             TopDef::DefStuct(n, members) => {
-                type_table.add_struct(arena, n.clone(), members.clone())?;
+                type_table.add_struct(n.clone(), members.clone())?;
             }
             TopDef::DefUnion(n, members) => {
-                type_table.add_union(arena, n.clone(), members.clone())?;
+                type_table.add_union(n.clone(), members.clone())?;
             }
-            _ => (),
+            TopDef::DefVars(def) | TopDef::DefConst(def) => {
+                type_table.add(def.1.clone())?;
+                for (_, e) in &def.2 {
+                    if let Some(e) = e {
+                        e.resolve_types(&mut type_table)?;
+                    }
+                }
+            }
+            TopDef::Defun(_, typeref, _, params, block) => {
+                type_table.add(typeref.clone())?;
+                for (t, _) in &params.params {
+                    type_table.add(t.clone())?;
+                }
+                block.resolve_types(&mut type_table)?;
+            }
         }
     }
 
@@ -93,7 +117,7 @@ fn check_recursive_definition<'a>(type_table: &TypeTable<'a>) -> Result<(), Erro
                 rec(type_table, mark, done, t.clone())?;
             }
         } else if let Some(base) = v.array_base() {
-            rec(type_table, mark, done, base)?;
+            rec(type_table, mark, done, base.clone())?;
         }
 
         done.insert(v);
@@ -106,6 +130,127 @@ fn check_recursive_definition<'a>(type_table: &TypeTable<'a>) -> Result<(), Erro
     }
 
     Ok(())
+}
+
+impl Block {
+    pub fn resolve_types<'a>(&self, type_table: &mut TypeTable<'a>) -> Result<(), Error> {
+        for defs in self.ref_vars() {
+            type_table.add(defs.1.clone())?;
+            for (_, e) in &defs.2 {
+                if let Some(e) = e {
+                    e.resolve_types(type_table)?;
+                }
+            }
+        }
+
+        for stmt in self.ref_stmts() {
+            stmt.resolve_types(type_table)?;
+        }
+        Ok(())
+    }
+}
+
+impl Statement {
+    pub fn resolve_types<'a>(&self, type_table: &mut TypeTable<'a>) -> Result<(), Error> {
+        match self {
+            Statement::Expr(e) => {
+                e.resolve_types(type_table)?;
+            }
+            Statement::Block(b) => {
+                b.resolve_types(type_table)?;
+            }
+            Statement::If(e, st, sf) => {
+                e.resolve_types(type_table)?;
+                st.resolve_types(type_table)?;
+                if let Some(s) = sf.as_ref() {
+                    s.resolve_types(type_table)?;
+                }
+            }
+            Statement::While(e, s) | Statement::DoWhile(e, s) => {
+                e.resolve_types(type_table)?;
+                s.resolve_types(type_table)?;
+            }
+            Statement::For(init, cond, step, body) => {
+                init.resolve_types(type_table)?;
+                cond.resolve_types(type_table)?;
+                step.resolve_types(type_table)?;
+                body.resolve_types(type_table)?;
+            }
+            Statement::Switch(e, branch) => {
+                e.resolve_types(type_table)?;
+                for (vals, body) in branch {
+                    for v in vals {
+                        v.resolve_types( type_table)?;
+                    }
+
+                    body.resolve_types(type_table)?;
+                }
+            }
+            Statement::Return(e) => {
+                if let Some(e) = e {
+                    e.resolve_types(type_table)?;
+                }
+            }
+            _ => (),
+        };
+        Ok(())
+    }
+}
+
+impl Expr {
+    pub fn resolve_types<'a, 'b>(&self, type_table: &'b mut TypeTable<'a>) -> Result<&'b TypeCell<'a>, Error> {
+        match self {
+            Expr::Assign(e1, e2) | Expr::AssignOp(e1, _, e2) | Expr::BinOp(_, e1, e2) => {
+                e1.resolve_types(type_table)?;
+                e2.resolve_types(type_table)
+            }
+            Expr::Ternary(cond, e1, e2) => {
+                cond.resolve_types(type_table)?;
+                e1.resolve_types(type_table)?;
+                e2.resolve_types(type_table)
+            }
+            Expr::Cast(t, e) => {
+                e.resolve_types(type_table)?;
+                type_table.add(t.clone())
+            }
+            Expr::PreInc(e) | Expr::PreDec(e) | Expr::Op(_, e) | Expr::Deref(e) | Expr::PostInc(e) | Expr::PostDec(e) |
+                Expr::Member(e, _) | Expr::PMember(e, _) => {
+                e.resolve_types(type_table)
+            }
+            Expr::Addr(e) => {
+                e.resolve_types(type_table)
+            }
+            Expr::SizeofT(t) => type_table.add(t.clone()),
+            Expr::SizeofE(e) => e.resolve_types(type_table),
+            Expr::ArrayRef(e1, e2) => {
+                e1.resolve_types(type_table)?;
+                e2.resolve_types(type_table)
+            }
+            Expr::Call(e, args) => {
+                for a in &args.0 {
+                    a.resolve_types(type_table)?;
+                }
+                e.resolve_types(type_table)
+            }
+            Expr::Primary(p) => p.resolve_types(type_table),
+        }
+    }
+}
+
+impl Primary {
+    pub fn resolve_types<'a, 'b>(&self, type_table: &'b mut TypeTable<'a>) -> Result<&'b TypeCell<'a>, Error> {
+        match self {
+            Primary::Variable(v) => {
+                type_table.add(v.get_entity().unwrap().get_type().clone())
+            }
+            Primary::Expr(e) => {
+                e.resolve_types(type_table)
+            }
+            Primary::Integer(_) => Ok(type_table.long()),
+            Primary::Character(_) => Ok(type_table.char()),
+            Primary::String(_) => Ok(type_table.string()),
+        }
+    }
 }
 
 #[cfg(test)]

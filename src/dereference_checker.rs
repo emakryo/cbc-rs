@@ -186,10 +186,8 @@ impl Expr {
             Expr::Primary(p) => p.get_type(type_table),
             Expr::ArrayRef(e, _) => {
                 let t = e.get_type(type_table)?;
-                if let Some(base) = t.array_base() {
-                    return Ok(base);
-                }
-                Err(Error::Semantic(format!("Invalid index access: {:?}", self)))
+                t.array_base().ok_or(
+                    Error::Semantic(format!("Invalid dereference: {:?}", self)))
             }
             Expr::Deref(e) => {
                 let t = e.get_type(type_table)?;
@@ -252,12 +250,12 @@ impl Primary {
                 let t = entity.get_type();
                 Ok(type_table
                     .get(t)
-                    .expect(&format!("Type must be resolved: {:?}", t))
-                    .clone())
+                    .cloned()
+                    .expect(&format!("Type must be resolved: {:?}", t)))
             }
-            Primary::Integer(_) => Ok(type_table.long()),
-            Primary::Character(_) => Ok(type_table.char()),
-            Primary::String(_) => Ok(type_table.string()),
+            Primary::Integer(_) => Ok(type_table.long().clone()),
+            Primary::Character(_) => Ok(type_table.char().clone()),
+            Primary::String(_) => Ok(type_table.string().clone()),
             Primary::Expr(e) => e.get_type(type_table),
         }
     }

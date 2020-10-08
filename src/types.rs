@@ -89,6 +89,13 @@ impl<'a> Type<'a> {
         self.return_type().is_some()
     }
 
+    fn is_undefined(&self) -> bool {
+        match self {
+            Type::Undefined => true,
+            _ => false,
+        }
+    }
+
     fn pointer_base(&self) -> Option<TypeCell<'a>> {
         match self {
             Type::Pointer { base } => Some(base.clone()),
@@ -206,7 +213,6 @@ impl<'a> std::fmt::Debug for TypeCell<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         f.debug_tuple("TypeCell")
             .field(&(self.0.get() as *const _))
-            //.field(&self.borrow())
             .finish()
     }
 }
@@ -236,20 +242,20 @@ impl<'a> TypeCell<'a> {
         self.borrow().is_func_pointer()
     }
 
-    pub fn get_field(&self, name: &Ident) -> Result<TypeCell<'a>, Error> {
-        Ok(self.borrow().clone().get_field(name)?.clone())
+    pub fn get_field<'b>(&'b self, name: &Ident) -> Result<TypeCell<'a>, Error> {
+        Ok(self.borrow().get_field(name)?.clone())
     }
 
     pub fn pointer_base(&self) -> Option<TypeCell<'a>> {
-        self.borrow().clone().pointer_base()
+        self.borrow().pointer_base()
     }
 
     pub fn array_base(&self) -> Option<TypeCell<'a>> {
-        self.borrow().clone().array_base()
+        self.borrow().array_base()
     }
 
     pub fn return_type(&self) -> Option<TypeCell<'a>> {
-        self.borrow().clone().return_type()
+        self.borrow().return_type()
     }
 
     pub fn members(&self) -> Option<Vec<(TypeCell<'a>, Ident)>> {
@@ -257,57 +263,67 @@ impl<'a> TypeCell<'a> {
     }
 }
 
-#[derive(Debug)]
-pub struct TypeTable<'a>(HashMap<TypeRef, TypeCell<'a>>);
 pub type TypeArena<'a> = Arena<RefCell<Type<'a>>>;
+pub struct TypeTable<'a>{
+    map: HashMap<TypeRef, TypeCell<'a>>,
+    arena: &'a TypeArena<'a>,
+}
+
+impl<'a> std::fmt::Debug for TypeTable<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        self.map.fmt(f)
+    }
+}
+
 
 impl<'a> TypeTable<'a> {
-    fn empty() -> Self {
-        TypeTable(HashMap::new())
+    fn empty(arena: &'a TypeArena<'a>) -> Self {
+        TypeTable{
+            map: HashMap::new(),
+            arena,
+        }
     }
 
     pub fn new(arena: &'a TypeArena<'a>) -> Self {
-        let mut table = Self::empty();
+        let mut table = Self::empty(arena);
 
-        table.insert(arena, TypeRef::Char, Type::char()).unwrap();
-        table.insert(arena, TypeRef::UChar, Type::uchar()).unwrap();
-        table.insert(arena, TypeRef::Short, Type::short()).unwrap();
+        table.insert( TypeRef::Char, Type::char()).unwrap();
+        table.insert( TypeRef::UChar, Type::uchar()).unwrap();
+        table.insert( TypeRef::Short, Type::short()).unwrap();
         table
-            .insert(arena, TypeRef::UShort, Type::ushort())
+            .insert(TypeRef::UShort, Type::ushort())
             .unwrap();
-        table.insert(arena, TypeRef::Int, Type::int()).unwrap();
-        table.insert(arena, TypeRef::UInt, Type::uint()).unwrap();
-        table.insert(arena, TypeRef::Long, Type::long()).unwrap();
-        table.insert(arena, TypeRef::ULong, Type::ulong()).unwrap();
-        table.insert(arena, TypeRef::Void, Type::Void).unwrap();
+        table.insert(TypeRef::Int, Type::int()).unwrap();
+        table.insert(TypeRef::UInt, Type::uint()).unwrap();
+        table.insert(TypeRef::Long, Type::long()).unwrap();
+        table.insert(TypeRef::ULong, Type::ulong()).unwrap();
+        table.insert(TypeRef::Void, Type::Void).unwrap();
 
         table
     }
 
     pub fn get<'b>(&'b self, type_ref: &TypeRef) -> Option<&'b TypeCell<'a>> {
-        self.0.get(type_ref)
+        self.map.get(type_ref)
     }
 
-    fn insert<'b>(
-        &'b mut self,
-        arena: &'a TypeArena<'a>,
+    fn insert(
+        &mut self,
         k: TypeRef,
         v: Type<'a>,
-    ) -> Result<(), Error> {
-        let v = arena.alloc(RefCell::new(v));
-        self.0.insert(k, TypeCell(Cell::new(v)));
-        Ok(())
+    ) -> Result<&TypeCell<'a>, Error> {
+        let v = self.arena.alloc(RefCell::new(v));
+        self.map.insert(k.clone(), TypeCell(Cell::new(v)));
+        Ok(self.get(&k).unwrap())
     }
 
-    fn add(&mut self, arena: &'a TypeArena<'a>, tref: TypeRef) -> Result<(), Error> {
-        if self.0.contains_key(&tref) {
-            return Ok(());
+    pub fn add(&mut self, tref: TypeRef) -> Result<&TypeCell<'a>, Error> {
+        if self.map.contains_key(&tref) {
+            return Ok(self.map.get(&tref).unwrap());
         }
 
         let t = match &tref {
             TypeRef::Array { base, size } => {
-                self.add(arena, *base.clone())?;
-                let base = self.get(base.as_ref()).unwrap();
+                let base = self.add(*base.clone())?;
                 if base.borrow().is_void() {
                     return Err(Error::Semantic(
                         "Array type cannot have void elements.".into(),
@@ -323,24 +339,22 @@ impl<'a> TypeTable<'a> {
                 params,
                 variable_length,
             } => {
-                self.add(arena, *base.clone())?;
-                let base = self.get(base.as_ref()).unwrap().clone();
+                let base = self.add(*base.clone())?.clone();
                 let mut param_types = vec![];
 
                 for param in params {
-                    self.add(arena, param.clone())?;
+                    let param_t = self.add(param.clone())?.clone();
 
-                    param_types.push(self.get(param).unwrap().clone());
+                    param_types.push(param_t);
                 }
                 Type::Function {
-                    base: base.clone(),
+                    base,
                     params: param_types,
                     variable_length: *variable_length,
                 }
             }
             TypeRef::Pointer { base } => {
-                self.add(arena, *base.clone())?;
-                let base = self.get(base.as_ref()).unwrap();
+                let base = self.add(*base.clone())?;
                 Type::Pointer { base: base.clone() }
             }
             TypeRef::Struct(_) | TypeRef::Union(_) | TypeRef::User(_) => Type::Undefined,
@@ -350,40 +364,35 @@ impl<'a> TypeTable<'a> {
             }
         };
 
-        self.insert(arena, tref, t)?;
-        Ok(())
+        self.insert(tref, t)
     }
 
     pub fn add_usertype(
         &mut self,
-        arena: &'a TypeArena<'a>,
         name: Ident,
         typeref: TypeRef,
     ) -> Result<(), Error> {
         let user_type = TypeRef::User(name);
-        self.add(arena, user_type.clone())?;
+        self.add(user_type.clone())?;
 
-        self.add(arena, typeref.clone())?;
-        let t = self.get(&typeref).unwrap();
-        self.get(&user_type).unwrap().0.set(&t.0.get());
+        let t = self.add(typeref.clone())?.0.get();
+        self.get(&user_type).unwrap().0.set(t);
 
         Ok(())
     }
 
     pub fn add_struct(
         &mut self,
-        arena: &'a TypeArena<'a>,
         name: Ident,
         members: Vec<(TypeRef, Ident)>,
     ) -> Result<(), Error> {
         let mut member_types = vec![];
 
         for (r, n) in members {
-            self.add(arena, r.clone())?;
-            let t = self.get(&r).unwrap();
+            let t = self.add(r)?;
             if t.borrow().is_void() {
                 return Err(Error::Semantic(
-                    "Array type cannot have void elements.".into(),
+                    "Struct type cannot have void field".into(),
                 ));
             }
             member_types.push((t.clone(), n));
@@ -396,9 +405,12 @@ impl<'a> TypeTable<'a> {
         };
 
         if let Some(cell) = self.get(&r) {
+            if !cell.borrow().is_undefined() {
+                return Err(Error::Semantic("Duplicated struct name".into()));
+            }
             *cell.borrow_mut() = t
         } else {
-            self.insert(arena, r.clone(), t)?;
+            self.insert(r.clone(), t)?;
         }
 
         // let t = self.get(&r).unwrap();
@@ -409,18 +421,16 @@ impl<'a> TypeTable<'a> {
 
     pub fn add_union(
         &mut self,
-        arena: &'a TypeArena<'a>,
         name: Ident,
         members: Vec<(TypeRef, Ident)>,
     ) -> Result<(), Error> {
         let mut member_types = vec![];
 
         for (r, n) in members {
-            self.add(arena, r.clone())?;
-            let t = self.get(&r).unwrap();
+            let t = self.add(r)?;
             if t.borrow().is_void() {
                 return Err(Error::Semantic(
-                    "Array type cannot have void elements.".into(),
+                    "Union type cannot have void field".into(),
                 ));
             }
             member_types.push((t.clone(), n));
@@ -433,9 +443,12 @@ impl<'a> TypeTable<'a> {
         };
 
         if let Some(cell) = self.get(&r) {
+            if !cell.borrow().is_undefined() {
+                return Err(Error::Semantic("Duplicated union name".into()));
+            }
             *cell.borrow_mut() = t
         } else {
-            self.insert(arena, r.clone(), t)?;
+            self.insert(r.clone(), t)?;
         }
 
         // let t = self.get(&r).unwrap();
@@ -444,23 +457,22 @@ impl<'a> TypeTable<'a> {
         Ok(())
     }
 
-    pub fn long(&self) -> TypeCell<'a> {
-        self.get(&TypeRef::Long).unwrap().clone()
+    pub fn long(&self) -> &TypeCell<'a> {
+        self.get(&TypeRef::Long).unwrap()
     }
 
-    pub fn char(&self) -> TypeCell<'a> {
-        self.get(&TypeRef::Char).unwrap().clone()
+    pub fn char(&self) -> &TypeCell<'a> {
+        self.get(&TypeRef::Char).unwrap()
     }
 
-    pub fn string(&self) -> TypeCell<'a> {
+    pub fn string(&self) -> &TypeCell<'a> {
         self.get(&TypeRef::Pointer {
             base: Box::new(TypeRef::Char),
         })
         .unwrap()
-        .clone()
     }
 
     pub fn values<'b>(&'b self) -> Box<dyn Iterator<Item = TypeCell<'a>> + 'b> {
-        Box::new(self.0.values().cloned())
+        Box::new(self.map.values().cloned())
     }
 }
