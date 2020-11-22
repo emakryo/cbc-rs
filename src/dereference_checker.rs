@@ -20,7 +20,7 @@ pub fn check_dereference<'a, 'b>(
                     }
                 }
             }
-            Declaration::Defun(_, _, _, _, b) => {
+            Declaration::Defun(_, b) => {
                 b.check_deref(type_table)?;
             }
             Declaration::FuncDecl(_, _, _)

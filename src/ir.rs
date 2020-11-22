@@ -1,3 +1,4 @@
+use crate::ast::{DefVar, Defun};
 use crate::entity::Entity;
 
 pub enum Statement {
@@ -81,7 +82,7 @@ pub struct Label(String);
 pub enum Constant {}
 
 pub struct IR {
-    pub defvars: Vec<(String, Expr)>,
-    pub defuns: Vec<(String, Vec<Statement>)>,
+    pub defvars: Vec<(DefVar, Option<Expr>)>,
+    pub defuns: Vec<(Defun, Vec<Statement>)>,
     pub funcdecls: Vec<String>,
 }

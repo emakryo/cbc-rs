@@ -241,11 +241,19 @@ pub struct Params {
     pub variable_length: bool,
 }
 
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub struct Defun {
+    pub storage: Storage,
+    pub type_: TypeRef,
+    pub name: Ident,
+    pub params: Params,
+}
+
 #[derive(Debug, Eq, PartialEq)]
 pub enum Declaration {
     DefVar(DefVar),
     VarDecl(DefVar),
-    Defun(Storage, TypeRef, Ident, Params, Block),
+    Defun(Defun, Block),
     FuncDecl(TypeRef, Ident, Params),
     DefConst(DefVar),
     DefStuct(Ident, Vec<(TypeRef, Ident)>),
@@ -264,13 +272,3 @@ pub struct Ast<'a> {
     pub declarations: Vec<Declaration>,
     pub type_alias: TypeMap,
 }
-
-// #[derive(Debug)]
-// pub enum HeaderDecl {
-//     FuncDecl(TypeRef, Ident, Params),
-//     VarsDecl(DefVar),
-//     DefConst(DefVar),
-//     DefStuct(Ident, Vec<(TypeRef, Ident)>),
-//     DefUnion(Ident, Vec<(TypeRef, Ident)>),
-//     TypeDef(TypeRef, Ident),
-// }

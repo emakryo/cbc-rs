@@ -26,9 +26,9 @@ pub fn resolve_types<'a, 'b>(
                     e.resolve_types(&mut type_table)?;
                 }
             }
-            Declaration::Defun(_, typeref, _, params, block) => {
-                type_table.add(typeref.clone())?;
-                for (t, _) in &params.params {
+            Declaration::Defun(defun, block) => {
+                type_table.add(defun.type_.clone())?;
+                for (t, _) in &defun.params.params {
                     type_table.add(t.clone())?;
                 }
                 block.resolve_types(&mut type_table)?;

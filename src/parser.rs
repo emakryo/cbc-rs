@@ -789,7 +789,17 @@ fn defun<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Declaration> {
             ),
             preceded(sp, |i| block(i, types)),
         )),
-        |(s, t, n, p, b)| Declaration::Defun(s, t, n, p, b),
+        |(s, t, n, p, b)| {
+            Declaration::Defun(
+                Defun {
+                    storage: s,
+                    type_: t,
+                    name: n,
+                    params: p,
+                },
+                b,
+            )
+        },
     )(i)
 }
 

@@ -9,8 +9,12 @@ pub fn resolve_variables(ast: &mut Ast) -> Result<GlobalScope, Error> {
 
     for def in &mut ast.declarations {
         match def {
-            Declaration::Defun(_, t, name, param, block) => {
-                let scope = global.add_function(name.to_string(), t.clone(), param.clone())?;
+            Declaration::Defun(defun, block) => {
+                let scope = global.add_function(
+                    defun.name.to_string(),
+                    defun.type_.clone(),
+                    defun.params.clone(),
+                )?;
                 block.set_scope(scope);
             }
             Declaration::DefVar(def) | Declaration::VarDecl(def) | Declaration::DefConst(def) => {
@@ -27,7 +31,7 @@ pub fn resolve_variables(ast: &mut Ast) -> Result<GlobalScope, Error> {
 
     for def in &mut ast.declarations {
         match def {
-            Declaration::Defun(_, _, _, _, block) => {
+            Declaration::Defun(_, block) => {
                 block.resolve_variables(block.get_scope().expect("No scope set"))?;
             }
             Declaration::DefVar(def) => {
