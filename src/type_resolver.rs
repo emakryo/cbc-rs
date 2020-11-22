@@ -11,33 +11,29 @@ pub fn resolve_types<'a, 'b>(
 
     for def in &ast.declarations {
         match def {
-            Declarations::TypeDef(typeref, n) => {
+            Declaration::TypeDef(typeref, n) => {
                 type_table.add_usertype(n.clone(), typeref.clone())?;
             }
-            Declarations::DefStuct(n, members) => {
+            Declaration::DefStuct(n, members) => {
                 type_table.add_struct(n.clone(), members.clone())?;
             }
-            Declarations::DefUnion(n, members) => {
+            Declaration::DefUnion(n, members) => {
                 type_table.add_union(n.clone(), members.clone())?;
             }
-            Declarations::DefVars(def)
-            | Declarations::VarsDecl(def)
-            | Declarations::DefConst(def) => {
-                type_table.add(def.1.clone())?;
-                for (_, e) in &def.2 {
-                    if let Some(e) = e {
-                        e.resolve_types(&mut type_table)?;
-                    }
+            Declaration::DefVar(def) | Declaration::VarDecl(def) | Declaration::DefConst(def) => {
+                type_table.add(def.type_.clone())?;
+                if let Some(e) = &def.init {
+                    e.resolve_types(&mut type_table)?;
                 }
             }
-            Declarations::Defun(_, typeref, _, params, block) => {
+            Declaration::Defun(_, typeref, _, params, block) => {
                 type_table.add(typeref.clone())?;
                 for (t, _) in &params.params {
                     type_table.add(t.clone())?;
                 }
                 block.resolve_types(&mut type_table)?;
             }
-            Declarations::FuncDecl(typeref, ..) => {
+            Declaration::FuncDecl(typeref, ..) => {
                 type_table.add(typeref.clone())?;
             }
         }
@@ -119,12 +115,10 @@ impl Block {
         &'b self,
         type_table: &mut TypeTable<'a, 'b>,
     ) -> Result<(), Error> {
-        for defs in self.ref_vars() {
-            type_table.add(defs.1.clone())?;
-            for (_, e) in &defs.2 {
-                if let Some(e) = e {
-                    e.resolve_types(type_table)?;
-                }
+        for def in self.ref_vars() {
+            type_table.add(def.type_.clone())?;
+            if let Some(e) = &def.init {
+                e.resolve_types(type_table)?;
             }
         }
 

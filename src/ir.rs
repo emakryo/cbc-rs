@@ -79,3 +79,9 @@ pub enum BinOp {
 pub struct Label(String);
 
 pub enum Constant {}
+
+pub struct IR {
+    pub defvars: Vec<(String, Expr)>,
+    pub defuns: Vec<(String, Vec<Statement>)>,
+    pub funcdecls: Vec<String>,
+}

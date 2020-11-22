@@ -606,7 +606,7 @@ fn expr1<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Expr> {
     )(i)
 }
 
-fn defvars<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, DefVars> {
+fn defvars<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Vec<DefVar>> {
     map(
         tuple((
             storage,
@@ -622,7 +622,16 @@ fn defvars<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, DefVars> {
                 preceded(sp, char(';')),
             ),
         )),
-        |(s, t, vs)| DefVars(s, t, vs),
+        |(s, t, vs)| {
+            vs.into_iter()
+                .map(|(name, init)| DefVar {
+                    storage: s.clone(),
+                    type_: t.clone(),
+                    name,
+                    init,
+                })
+                .collect()
+        },
     )(i)
 }
 
@@ -636,7 +645,7 @@ fn block<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Block> {
             )),
             preceded(sp, char('}')),
         ),
-        |(d, s)| Block::new(d, s),
+        |(d, s)| Block::new(d.into_iter().flatten().collect(), s),
     )(i)
 }
 
@@ -764,7 +773,7 @@ fn params<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Params> {
     ))(i)
 }
 
-fn defun<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Declarations> {
+fn defun<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Declaration> {
     map(
         tuple((
             storage,
@@ -780,7 +789,7 @@ fn defun<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Declarations> {
             ),
             preceded(sp, |i| block(i, types)),
         )),
-        |(s, t, n, p, b)| Declarations::Defun(s, t, n, p, b),
+        |(s, t, n, p, b)| Declaration::Defun(s, t, n, p, b),
     )(i)
 }
 
@@ -795,7 +804,7 @@ fn member_list<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Vec<(TypeRef
     )(i)
 }
 
-fn defconst<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, DefVars> {
+fn defconst<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Vec<DefVar>> {
     preceded(keyword("const"), preceded(sp, |i| defvars(i, types)))(i)
 }
 
@@ -830,25 +839,31 @@ fn typedef<'a>(i: &'a str, types: &mut TypeMap) -> IResult<&'a str, (TypeRef, Id
     Ok((i, (t, id)))
 }
 
-fn top_def<'a>(i: &'a str, types: &mut TypeMap) -> IResult<&'a str, Declarations> {
+fn top_def<'a>(i: &'a str, types: &mut TypeMap) -> IResult<&'a str, Vec<Declaration>> {
     let res = alt((
-        |i| defun(i, types),
-        map(|i| defvars(i, types), Declarations::DefVars),
-        map(|i| defconst(i, types), Declarations::DefConst),
+        map(|i| defun(i, types), |x| vec![x]),
+        map(
+            |i| defvars(i, types),
+            |vs| vs.into_iter().map(Declaration::DefVar).collect(),
+        ),
+        map(
+            |i| defconst(i, types),
+            |vs| vs.into_iter().map(Declaration::DefConst).collect(),
+        ),
         map(
             |i| defstruct(i, types),
-            |(n, t)| Declarations::DefStuct(n, t),
+            |(n, t)| vec![Declaration::DefStuct(n, t)],
         ),
         map(
             |i| defunion(i, types),
-            |(n, t)| Declarations::DefUnion(n, t),
+            |(n, t)| vec![Declaration::DefUnion(n, t)],
         ),
     ))(i);
     if res.is_ok() {
         return res;
     }
     match typedef(i, types) {
-        Ok((i, o)) => Ok((i, Declarations::TypeDef(o.0, o.1))),
+        Ok((i, o)) => Ok((i, vec![Declaration::TypeDef(o.0, o.1)])),
         Err(e) => Err(e),
     }
 }
@@ -894,9 +909,9 @@ pub fn parse_source<'a, P: AsRef<Path>>(i: &'a str, import_paths: &[P]) -> Resul
         i = sp(i)?.0;
 
         match top_def(i, &mut types) {
-            Ok((j, d)) => {
+            Ok((j, mut d)) => {
                 i = j;
-                declarations.push(d);
+                declarations.append(&mut d);
             }
             _ => {
                 all_consuming(sp)(i)?;
@@ -912,7 +927,7 @@ pub fn parse_source<'a, P: AsRef<Path>>(i: &'a str, import_paths: &[P]) -> Resul
     })
 }
 
-fn func_decl<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Declarations> {
+fn func_decl<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Declaration> {
     map(
         tuple((
             preceded(tuple((keyword("extern"), sp)), |i| typeref(i, types)),
@@ -923,29 +938,32 @@ fn func_decl<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Declarations> 
                 tuple((sp, char(')'), sp, char(';'))),
             ),
         )),
-        |(t, n, p)| Declarations::FuncDecl(t, n, p),
+        |(t, n, p)| Declaration::FuncDecl(t, n, p),
     )(i)
 }
 
-fn vars_decl<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Declarations> {
+fn vars_decl<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Vec<Declaration>> {
     map(
         preceded(tuple((keyword("extern"), sp)), |i| defvars(i, types)),
-        |d| Declarations::VarsDecl(d),
+        |d| d.into_iter().map(Declaration::VarDecl).collect(),
     )(i)
 }
 
-fn header_def<'a>(i: &'a str, types: &mut TypeMap) -> IResult<&'a str, Declarations> {
+fn header_def<'a>(i: &'a str, types: &mut TypeMap) -> IResult<&'a str, Vec<Declaration>> {
     let res = alt((
-        |i| func_decl(i, types),
+        map(|i| func_decl(i, types), |x| vec![x]),
         |i| vars_decl(i, types),
-        map(|i| defconst(i, types), Declarations::DefConst),
+        map(
+            |i| defconst(i, types),
+            |xs| xs.into_iter().map(Declaration::DefConst).collect(),
+        ),
         map(
             |i| defstruct(i, types),
-            |(n, t)| Declarations::DefStuct(n, t),
+            |(n, t)| vec![Declaration::DefStuct(n, t)],
         ),
         map(
             |i| defunion(i, types),
-            |(n, t)| Declarations::DefUnion(n, t),
+            |(n, t)| vec![Declaration::DefUnion(n, t)],
         ),
     ))(i);
     if res.is_ok() {
@@ -953,7 +971,7 @@ fn header_def<'a>(i: &'a str, types: &mut TypeMap) -> IResult<&'a str, Declarati
     }
 
     match typedef(i, types) {
-        Ok((i, o)) => Ok((i, Declarations::TypeDef(o.0, o.1))),
+        Ok((i, o)) => Ok((i, vec![Declaration::TypeDef(o.0, o.1)])),
         Err(e) => Err(e),
     }
 }
@@ -963,7 +981,7 @@ fn header<P: AsRef<Path>>(
     header_paths: &[P],
     imports: &mut HashSet<Import>,
     types: &mut TypeMap,
-) -> Result<Vec<Declarations>, Error> {
+) -> Result<Vec<Declaration>, Error> {
     let mut i = i;
     let mut defs = vec![];
 
@@ -988,9 +1006,9 @@ fn header<P: AsRef<Path>>(
     loop {
         i = sp(i)?.0;
         match header_def(i, types) {
-            Ok((j, o)) => {
+            Ok((j, mut o)) => {
                 i = j;
-                defs.push(o);
+                defs.append(&mut o);
             }
             Err(_) => match all_consuming(sp)(i) {
                 Ok((_, _)) => return Ok(defs),

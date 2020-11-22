@@ -159,11 +159,16 @@ pub enum BinOp {
 }
 
 #[derive(Debug, Eq, PartialEq, Clone)]
-pub struct DefVars(pub Storage, pub TypeRef, pub Vec<(Ident, Option<Expr>)>);
+pub struct DefVar {
+    pub storage: Storage,
+    pub type_: TypeRef,
+    pub name: Ident,
+    pub init: Option<Expr>,
+}
 
 #[derive(Debug, Clone)]
 pub struct Block {
-    vars: Vec<DefVars>,
+    vars: Vec<DefVar>,
     stmts: Vec<Statement>,
     scope: Option<Rc<RefCell<LocalScope>>>,
 }
@@ -177,7 +182,7 @@ impl PartialEq for Block {
 impl Eq for Block {}
 
 impl Block {
-    pub fn new(vars: Vec<DefVars>, stmts: Vec<Statement>) -> Block {
+    pub fn new(vars: Vec<DefVar>, stmts: Vec<Statement>) -> Block {
         Block {
             vars,
             stmts,
@@ -185,11 +190,11 @@ impl Block {
         }
     }
 
-    pub fn ref_vars(&self) -> &Vec<DefVars> {
+    pub fn ref_vars(&self) -> &Vec<DefVar> {
         &self.vars
     }
 
-    pub fn mut_vars(&mut self) -> &mut Vec<DefVars> {
+    pub fn mut_vars(&mut self) -> &mut Vec<DefVar> {
         &mut self.vars
     }
 
@@ -237,12 +242,12 @@ pub struct Params {
 }
 
 #[derive(Debug, Eq, PartialEq)]
-pub enum Declarations {
-    DefVars(DefVars),
-    VarsDecl(DefVars),
+pub enum Declaration {
+    DefVar(DefVar),
+    VarDecl(DefVar),
     Defun(Storage, TypeRef, Ident, Params, Block),
     FuncDecl(TypeRef, Ident, Params),
-    DefConst(DefVars),
+    DefConst(DefVar),
     DefStuct(Ident, Vec<(TypeRef, Ident)>),
     DefUnion(Ident, Vec<(TypeRef, Ident)>),
     TypeDef(TypeRef, Ident),
@@ -256,16 +261,16 @@ pub struct Import {
 #[derive(Debug)]
 pub struct Ast<'a> {
     pub source: &'a str,
-    pub declarations: Vec<Declarations>,
+    pub declarations: Vec<Declaration>,
     pub type_alias: TypeMap,
 }
 
-#[derive(Debug)]
-pub enum HeaderDecl {
-    FuncDecl(TypeRef, Ident, Params),
-    VarsDecl(DefVars),
-    DefConst(DefVars),
-    DefStuct(Ident, Vec<(TypeRef, Ident)>),
-    DefUnion(Ident, Vec<(TypeRef, Ident)>),
-    TypeDef(TypeRef, Ident),
-}
+// #[derive(Debug)]
+// pub enum HeaderDecl {
+//     FuncDecl(TypeRef, Ident, Params),
+//     VarsDecl(DefVar),
+//     DefConst(DefVar),
+//     DefStuct(Ident, Vec<(TypeRef, Ident)>),
+//     DefUnion(Ident, Vec<(TypeRef, Ident)>),
+//     TypeDef(TypeRef, Ident),
+// }

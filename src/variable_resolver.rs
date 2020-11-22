@@ -9,51 +9,40 @@ pub fn resolve_variables(ast: &mut Ast) -> Result<GlobalScope, Error> {
 
     for def in &mut ast.declarations {
         match def {
-            Declarations::Defun(_, t, name, param, block) => {
+            Declaration::Defun(_, t, name, param, block) => {
                 let scope = global.add_function(name.to_string(), t.clone(), param.clone())?;
                 block.set_scope(scope);
             }
-            Declarations::DefVars(defs) => {
-                for (name, _) in &mut defs.2 {
-                    global.add_variable(name.to_string(), defs.1.clone())?;
-                }
+            Declaration::DefVar(def) | Declaration::VarDecl(def) | Declaration::DefConst(def) => {
+                global.add_variable(def.name.to_string(), def.type_.clone())?;
             }
-            Declarations::VarsDecl(vs) | Declarations::DefConst(vs) => {
-                for (name, _) in &vs.2 {
-                    global.add_variable(name.to_string(), vs.1.clone())?;
-                }
-            }
-            Declarations::FuncDecl(t, name, p) => {
+            Declaration::FuncDecl(t, name, p) => {
                 global.add_function(name.to_string(), t.clone(), p.clone())?;
             }
-            Declarations::DefStuct(_, _)
-            | Declarations::DefUnion(_, _)
-            | Declarations::TypeDef(_, _) => (),
+            Declaration::DefStuct(_, _)
+            | Declaration::DefUnion(_, _)
+            | Declaration::TypeDef(_, _) => (),
         }
     }
 
     for def in &mut ast.declarations {
         match def {
-            Declarations::Defun(_, _, _, _, block) => {
+            Declaration::Defun(_, _, _, _, block) => {
                 block.resolve_variables(block.get_scope().expect("No scope set"))?;
             }
-            Declarations::DefVars(defs) => {
-                for (_, expr) in &mut defs.2 {
-                    if let Some(expr) = expr {
-                        expr.resolve_variables(Rc::clone(&global.root))?;
-                    }
+            Declaration::DefVar(def) => {
+                if let Some(expr) = &mut def.init {
+                    expr.resolve_variables(Rc::clone(&global.root))?;
                 }
             }
-            Declarations::DefConst(defs) => {
-                for (name, expr) in &mut defs.2 {
-                    if let Some(expr) = expr {
-                        expr.resolve_variables(Rc::clone(&global.root))?;
-                    } else {
-                        return Err(Error::Semantic(format!(
-                            "const declaration has no initial value: {}",
-                            name.to_string()
-                        )));
-                    }
+            Declaration::DefConst(def) => {
+                if let Some(expr) = &mut def.init {
+                    expr.resolve_variables(Rc::clone(&global.root))?;
+                } else {
+                    return Err(Error::Semantic(format!(
+                        "const declaration has no initial value: {}",
+                        def.name.to_string()
+                    )));
                 }
             }
             _ => (),
@@ -65,15 +54,13 @@ pub fn resolve_variables(ast: &mut Ast) -> Result<GlobalScope, Error> {
 
 impl Block {
     fn resolve_variables(&mut self, scope: Rc<RefCell<LocalScope>>) -> Result<(), Error> {
-        for vars in self.mut_vars() {
-            for (var, init) in &mut vars.2 {
-                scope
-                    .borrow_mut()
-                    .add_variable(var.to_string(), vars.1.clone())?;
+        for var in self.mut_vars() {
+            scope
+                .borrow_mut()
+                .add_variable(var.name.to_string(), var.type_.clone())?;
 
-                if let Some(init) = init.as_mut() {
-                    init.resolve_variables(Rc::clone(&scope))?;
-                }
+            if let Some(init) = &mut var.init {
+                init.resolve_variables(Rc::clone(&scope))?;
             }
         }
 

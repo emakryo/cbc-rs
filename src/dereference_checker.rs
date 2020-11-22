@@ -8,28 +8,26 @@ pub fn check_dereference<'a, 'b>(
 ) -> Result<(), Error> {
     for defs in &ast.declarations {
         match defs {
-            Declarations::DefVars(DefVars(_, _, defs))
-            | Declarations::DefConst(DefVars(_, _, defs)) => {
-                for (_, expr) in defs {
-                    if let Some(expr) = expr.as_ref() {
-                        expr.check_deref(&type_table)?;
-                        if !expr.is_constant() {
-                            return Err(Error::Semantic(format!(
-                                "Global initializer is not constant: {:?}",
-                                expr
-                            )));
-                        }
+            Declaration::DefVar(DefVar { init, .. })
+            | Declaration::DefConst(DefVar { init, .. }) => {
+                if let Some(expr) = init.as_ref() {
+                    expr.check_deref(&type_table)?;
+                    if !expr.is_constant() {
+                        return Err(Error::Semantic(format!(
+                            "Global initializer is not constant: {:?}",
+                            expr
+                        )));
                     }
                 }
             }
-            Declarations::Defun(_, _, _, _, b) => {
+            Declaration::Defun(_, _, _, _, b) => {
                 b.check_deref(type_table)?;
             }
-            Declarations::FuncDecl(_, _, _)
-            | Declarations::VarsDecl(_)
-            | Declarations::DefStuct(_, _)
-            | Declarations::DefUnion(_, _)
-            | Declarations::TypeDef(_, _) => (),
+            Declaration::FuncDecl(_, _, _)
+            | Declaration::VarDecl(_)
+            | Declaration::DefStuct(_, _)
+            | Declaration::DefUnion(_, _)
+            | Declaration::TypeDef(_, _) => (),
         }
     }
     Ok(())
@@ -81,11 +79,9 @@ impl Statement {
 
 impl Block {
     fn check_deref<'a, 'b>(&self, type_table: &'a TypeTable<'a, 'b>) -> Result<(), Error> {
-        for vars in self.ref_vars() {
-            for (_, expr) in &vars.2 {
-                if let Some(expr) = expr {
-                    expr.check_deref(type_table)?;
-                }
+        for DefVar { init, .. } in self.ref_vars() {
+            if let Some(expr) = init {
+                expr.check_deref(type_table)?;
             }
         }
 
