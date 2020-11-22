@@ -13,16 +13,16 @@ impl ToString for Ident {
     }
 }
 
-#[derive(Debug, Eq, PartialEq, Clone)]
+#[derive(Debug, Eq, PartialEq, Clone, Hash)]
 pub struct Character(pub char);
 
-#[derive(Debug, Eq, PartialEq, Clone)]
+#[derive(Debug, Eq, PartialEq, Clone, Hash)]
 pub struct String_(pub String);
 
-#[derive(Debug, Eq, PartialEq, Clone)]
+#[derive(Debug, Eq, PartialEq, Clone, Hash)]
 pub struct Integer(pub usize);
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum TypeBase {
     Void,
     Char,
@@ -40,7 +40,7 @@ pub enum TypeBase {
 
 pub type TypeMap = HashMap<String, TypeRef>;
 
-#[derive(Debug, Eq, PartialEq, Clone)]
+#[derive(Debug, Eq, PartialEq, Clone, Hash)]
 pub enum TypeOpt {
     Array(Option<usize>),
     Pointer,
@@ -50,12 +50,12 @@ pub enum TypeOpt {
     },
 }
 
-#[derive(Debug, Eq, PartialEq, Clone)]
+#[derive(Debug, Eq, PartialEq, Clone, Hash)]
 pub struct Storage {
     pub static_: bool,
 }
 
-#[derive(Debug, Eq, PartialEq, Clone)]
+#[derive(Debug, Eq, PartialEq, Clone, Hash)]
 pub enum UnaryOp {
     Plus,
     Minus,
@@ -63,7 +63,7 @@ pub enum UnaryOp {
     Rev,
 }
 
-#[derive(Debug, Eq, PartialEq, Clone)]
+#[derive(Debug, Eq, PartialEq, Clone, Hash)]
 pub enum Primary {
     Integer(Integer),
     Character(Character),
@@ -72,7 +72,7 @@ pub enum Primary {
     Expr(Box<Expr>),
 }
 
-#[derive(Debug, Eq, PartialEq, Clone)]
+#[derive(Debug, Eq, PartialEq, Clone, Hash)]
 pub struct Variable {
     name: Ident,
     entity: Option<Rc<Entity>>,
@@ -96,10 +96,10 @@ impl Variable {
     }
 }
 
-#[derive(Debug, Eq, PartialEq, Clone)]
+#[derive(Debug, Eq, PartialEq, Clone, Hash)]
 pub struct Args(pub Vec<Expr>);
 
-#[derive(Debug, Eq, PartialEq, Clone)]
+#[derive(Debug, Eq, PartialEq, Clone, Hash)]
 pub enum Expr {
     Assign(Box<Expr>, Box<Expr>),
     AssignOp(Box<Expr>, AssignOp, Box<Expr>),
@@ -122,7 +122,7 @@ pub enum Expr {
     Primary(Primary),
 }
 
-#[derive(Debug, Eq, PartialEq, Clone)]
+#[derive(Debug, Eq, PartialEq, Clone, Hash)]
 pub enum AssignOp {
     Plus,
     Minus,
@@ -136,7 +136,7 @@ pub enum AssignOp {
     Rshift,
 }
 
-#[derive(Debug, Eq, PartialEq, Clone)]
+#[derive(Debug, Eq, PartialEq, Clone, Hash)]
 pub enum BinOp {
     LogicalOr,
     LogicalAnd,

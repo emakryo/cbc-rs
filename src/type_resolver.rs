@@ -3,10 +3,10 @@ use crate::error::Error;
 use crate::types::{TypeArena, TypeCell, TypeTable};
 use std::collections::HashSet;
 
-pub fn resolve_types<'a>(
-    ast: &mut Source,
+pub fn resolve_types<'a, 'b>(
+    ast: &'b Source,
     arena: &'a TypeArena<'a>,
-) -> Result<TypeTable<'a>, Error> {
+) -> Result<TypeTable<'a, 'b>, Error> {
     let mut type_table = TypeTable::new(arena);
 
     for (_, decls) in &ast.0 {
@@ -19,7 +19,7 @@ pub fn resolve_types<'a>(
                 HeaderDecl::DefUnion(_, _) => todo!(),
                 HeaderDecl::FuncDecl(typeref, ..) => {
                     type_table.add(typeref.clone())?;
-                },
+                }
                 HeaderDecl::VarsDecl(def) | HeaderDecl::DefConst(def) => {
                     type_table.add(def.1.clone())?;
                     for (_, e) in &def.2 {
@@ -69,7 +69,7 @@ pub fn resolve_types<'a>(
     Ok(type_table)
 }
 
-fn check_duplication<'a>(table: &TypeTable<'a>) -> Result<(), Error> {
+fn check_duplication<'a, 'b>(table: &TypeTable<'a, 'b>) -> Result<(), Error> {
     for t in table.values() {
         let mut names = HashSet::new();
         if let Some(members) = t.members() {
@@ -88,13 +88,13 @@ fn check_duplication<'a>(table: &TypeTable<'a>) -> Result<(), Error> {
     Ok(())
 }
 
-fn check_recursive_definition<'a>(type_table: &TypeTable<'a>) -> Result<(), Error> {
+fn check_recursive_definition<'a, 'b>(type_table: &TypeTable<'a, 'b>) -> Result<(), Error> {
     type TypeSet<'a> = HashSet<TypeCell<'a>>;
     let mut mark = TypeSet::new();
     let mut done = TypeSet::new();
 
-    fn rec<'a>(
-        type_table: &TypeTable<'a>,
+    fn rec<'a, 'b>(
+        type_table: &TypeTable<'a, 'b>,
         mark: &mut TypeSet<'a>,
         done: &mut TypeSet<'a>,
         v: TypeCell<'a>,
@@ -133,7 +133,10 @@ fn check_recursive_definition<'a>(type_table: &TypeTable<'a>) -> Result<(), Erro
 }
 
 impl Block {
-    pub fn resolve_types<'a>(&self, type_table: &mut TypeTable<'a>) -> Result<(), Error> {
+    pub fn resolve_types<'a, 'b>(
+        &'b self,
+        type_table: &mut TypeTable<'a, 'b>,
+    ) -> Result<(), Error> {
         for defs in self.ref_vars() {
             type_table.add(defs.1.clone())?;
             for (_, e) in &defs.2 {
@@ -151,7 +154,10 @@ impl Block {
 }
 
 impl Statement {
-    pub fn resolve_types<'a>(&self, type_table: &mut TypeTable<'a>) -> Result<(), Error> {
+    pub fn resolve_types<'a, 'b>(
+        &'b self,
+        type_table: &mut TypeTable<'a, 'b>,
+    ) -> Result<(), Error> {
         match self {
             Statement::Expr(e) => {
                 e.resolve_types(type_table)?;
@@ -180,7 +186,7 @@ impl Statement {
                 e.resolve_types(type_table)?;
                 for (vals, body) in branch {
                     for v in vals {
-                        v.resolve_types( type_table)?;
+                        v.resolve_types(type_table)?;
                     }
 
                     body.resolve_types(type_table)?;
@@ -198,57 +204,66 @@ impl Statement {
 }
 
 impl Expr {
-    pub fn resolve_types<'a, 'b>(&self, type_table: &'b mut TypeTable<'a>) -> Result<&'b TypeCell<'a>, Error> {
-        match self {
+    pub fn resolve_types<'a, 'b, 'c>(
+        &'c self,
+        type_table: &'b mut TypeTable<'a, 'c>,
+    ) -> Result<TypeCell<'a>, Error> {
+        let t = match self {
             Expr::Assign(e1, e2) | Expr::AssignOp(e1, _, e2) | Expr::BinOp(_, e1, e2) => {
                 e1.resolve_types(type_table)?;
-                e2.resolve_types(type_table)
+                e2.resolve_types(type_table)?
             }
             Expr::Ternary(cond, e1, e2) => {
                 cond.resolve_types(type_table)?;
                 e1.resolve_types(type_table)?;
-                e2.resolve_types(type_table)
+                e2.resolve_types(type_table)?
             }
             Expr::Cast(t, e) => {
                 e.resolve_types(type_table)?;
-                type_table.add(t.clone())
+                type_table.add(t.clone())?.clone()
             }
-            Expr::PreInc(e) | Expr::PreDec(e) | Expr::Op(_, e) | Expr::Deref(e) | Expr::PostInc(e) | Expr::PostDec(e) |
-                Expr::Member(e, _) | Expr::PMember(e, _) => {
-                e.resolve_types(type_table)
-            }
-            Expr::Addr(e) => {
-                e.resolve_types(type_table)
-            }
-            Expr::SizeofT(t) => type_table.add(t.clone()),
-            Expr::SizeofE(e) => e.resolve_types(type_table),
+            Expr::PreInc(e)
+            | Expr::PreDec(e)
+            | Expr::Op(_, e)
+            | Expr::Deref(e)
+            | Expr::PostInc(e)
+            | Expr::PostDec(e)
+            | Expr::Member(e, _)
+            | Expr::PMember(e, _) => e.resolve_types(type_table)?,
+            Expr::Addr(e) => e.resolve_types(type_table)?,
+            Expr::SizeofT(t) => type_table.add(t.clone())?.clone(),
+            Expr::SizeofE(e) => e.resolve_types(type_table)?,
             Expr::ArrayRef(e1, e2) => {
                 e1.resolve_types(type_table)?;
-                e2.resolve_types(type_table)
+                e2.resolve_types(type_table)?
             }
             Expr::Call(e, args) => {
                 for a in &args.0 {
                     a.resolve_types(type_table)?;
                 }
-                e.resolve_types(type_table)
+                e.resolve_types(type_table)?
             }
-            Expr::Primary(p) => p.resolve_types(type_table),
-        }
+            Expr::Primary(p) => p.resolve_types(type_table)?,
+        };
+
+        type_table.add_expr(self, t.clone());
+        Ok(t)
     }
 }
 
 impl Primary {
-    pub fn resolve_types<'a, 'b>(&self, type_table: &'b mut TypeTable<'a>) -> Result<&'b TypeCell<'a>, Error> {
+    pub fn resolve_types<'a, 'b, 'c>(
+        &'c self,
+        type_table: &'b mut TypeTable<'a, 'c>,
+    ) -> Result<TypeCell<'a>, Error> {
         match self {
-            Primary::Variable(v) => {
-                type_table.add(v.get_entity().unwrap().get_type().clone())
-            }
-            Primary::Expr(e) => {
-                e.resolve_types(type_table)
-            }
-            Primary::Integer(_) => Ok(type_table.long()),
-            Primary::Character(_) => Ok(type_table.char()),
-            Primary::String(_) => Ok(type_table.string()),
+            Primary::Variable(v) => Ok(type_table
+                .add(v.get_entity().unwrap().get_type().clone())?
+                .clone()),
+            Primary::Expr(e) => e.resolve_types(type_table),
+            Primary::Integer(_) => Ok(type_table.long().clone()),
+            Primary::Character(_) => Ok(type_table.char().clone()),
+            Primary::String(_) => Ok(type_table.string().clone()),
         }
     }
 }
@@ -259,41 +274,41 @@ mod tests {
     use crate::parser::parse_source;
     use crate::variable_resolver::resolve_variables;
 
+    fn test_from_file(file_name: &std::path::Path) {
+        use std::io::Read;
+        dbg!(&file_name);
+        let mut code = String::new();
+        std::fs::File::open(&file_name)
+            .unwrap()
+            .read_to_string(&mut code)
+            .unwrap();
+        let mut header_paths = vec!["cbc-1.0/import"];
+        if let Some(p) = file_name.parent() {
+            header_paths.push(p.to_str().unwrap());
+        }
+        let mut ast = parse_source(&code, &header_paths).unwrap();
+        let scope = resolve_variables(&mut ast);
+        if scope.is_err() {
+            dbg!(scope).ok();
+            return;
+        }
+
+        let arena = TypeArena::new();
+        let table = resolve_types(&mut ast, &arena);
+
+        if table.is_err() {
+            dbg!(table).ok();
+            return;
+        }
+    }
+
     #[test]
     fn test_from_files() {
-        use std::io::Read;
-
         let root = env!("CARGO_MANIFEST_DIR");
 
         for file_name in glob::glob(&format!("{}/cbc-1.0/test/*.cb", root)).unwrap() {
             let file_name = file_name.unwrap();
-            // if !file_name.to_str().unwrap().contains("while2.cb") {
-            //     continue;
-            // }
-            dbg!(&file_name);
-            let mut code = String::new();
-            std::fs::File::open(&file_name)
-                .unwrap()
-                .read_to_string(&mut code)
-                .unwrap();
-            let mut header_paths = vec!["cbc-1.0/import"];
-            if let Some(p) = file_name.parent() {
-                header_paths.push(p.to_str().unwrap());
-            }
-            let mut ast = parse_source(&code, &header_paths).unwrap();
-            let scope = resolve_variables(&mut ast);
-            if scope.is_err() {
-                dbg!(scope).ok();
-                continue;
-            }
-
-            let arena = TypeArena::new();
-            let table = resolve_types(&mut ast, &arena);
-
-            if table.is_err() {
-                dbg!(table).ok();
-                continue;
-            }
+            test_from_file(&file_name);
         }
     }
 }

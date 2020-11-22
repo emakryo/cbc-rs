@@ -1,7 +1,6 @@
 use crate::ast::*;
 use crate::error::Error;
-use crate::type_resolver::{Type, TypeTable};
-use std::rc::Rc;
+use crate::types::{TypeCell, TypeTable};
 
 pub fn check_type(ast: &mut Source, type_table: &TypeTable) -> Result<(), Error> {
     for def in &mut ast.1 {
@@ -19,13 +18,12 @@ pub fn check_type(ast: &mut Source, type_table: &TypeTable) -> Result<(), Error>
     Ok(())
 }
 
-fn implicit_conversion(lhs: Rc<Type>, rhs: Rc<Type>) -> Result<Rc<Type>, Error> {
-    match (lhs.as_ref(), rhs.as_ref()) {
-        (Type::Integer { size: lsize, signed: lsigned }, Type::Integer { size: rsize, signed: rsigned }) => {
-            Ok(Rc::new(Type::Integer { size: *lsize.max(rsize), signed: *rsigned || *lsigned }))
-        }
-        (l, r) if l == r => Ok(lhs),
-        _ => Err(Error::Semantic("Failed implicit conversion".into())),
+fn implicit_conversion<'a>(lhs: &TypeCell<'a>, rhs: &TypeCell<'a>) -> Result<TypeCell<'a>, Error> {
+    // TODO implement
+    if lhs == rhs {
+        Ok(lhs.clone())
+    } else {
+        Err(Error::Semantic("Type does not match".into()))
     }
 }
 
@@ -48,7 +46,7 @@ impl DefVars {
         for (_, init) in &mut self.2 {
             if let Some(e) = init.as_mut() {
                 let t = e.check_type(type_table)?;
-                if &t != &self.1 {
+                if &t != type_table.get(&self.1).unwrap() {
                     e.cast_to(t)?;
                 }
             }
@@ -76,105 +74,118 @@ impl Statement {
 }
 
 impl Expr {
-    fn check_type(&mut self, type_table: &TypeTable) -> Result<TypeRef, Error> {
+    fn check_type<'a>(&mut self, type_table: &TypeTable<'a>) -> Result<TypeCell<'a>, Error> {
         match self {
             Expr::Primary(p) => p.check_type(type_table),
             Expr::Call(e, args) => {
                 let t = e.get_type(type_table)?;
-
-                if let Type::Function {
-                    base,
-                    params,
-                    variable_length,
-                } = t
-                    .pointer_base()
-                    .ok_or(Error::Semantic(
-                        "Function call to non function pointer".into(),
-                    ))?
-                    .as_ref()
-                {
-                    if *variable_length {
-                        if params.len() > args.0.len() {
-                            return Err(Error::Semantic("Fewer arguments are given to variable length function".into()));
-                        }
-                    } else {
-                        if params.len() != args.0.len() {
-                            return Err(Error::Semantic("Number of argument does not match".into()));
-                        }
-                    }
-
-                    for (t, e) in params.iter().zip(args.0.iter_mut()) {
-                        let u = e.get_type(type_table)?;
-                        if *t != u {
-                            e.cast_to(t.to_typeref())?;
-                        }
-                    }
-                    Ok(base.to_typeref())
-                } else {
-                    Err(Error::Semantic(
-                        "Function call to non function pointer".into(),
-                    ))
+                if !t.is_func_pointer() {
+                    return Err(Error::Semantic("Function call to non-function value".into()));
                 }
+
+                let params = t.params().unwrap();
+
+                if params.len() != args.0.len() {
+                    return Err(Error::Semantic("Number of parameter does not match.".into()));
+                }
+
+                for (p, a) in params.iter().zip(args.0.iter_mut()) {
+                    let t = a.get_type(type_table)?;
+                    if &t != p {
+                        let t = implicit_conversion(p, &t)?;
+                        a.cast_to(t)?;
+                    }
+                }
+
+                // if let Type::Function {
+                //     base,
+                //     params,
+                //     variable_length,
+                // } = t
+                //     .pointer_base()
+                //     .ok_or(Error::Semantic(
+                //         "Function call to non function pointer".into(),
+                //     ))?
+                //     .as_ref()
+                // {
+                //     if *variable_length {
+                //         if params.len() > args.0.len() {
+                //             return Err(Error::Semantic("Fewer arguments are given to variable length function".into()));
+                //         }
+                //     } else {
+                //         if params.len() != args.0.len() {
+                //             return Err(Error::Semantic("Number of argument does not match".into()));
+                //         }
+                //     }
+
+                //     for (t, e) in params.iter().zip(args.0.iter_mut()) {
+                //         let u = e.get_type(type_table)?;
+                //         if *t != u {
+                //             e.cast_to(t.to_typeref())?;
+                //         }
+                //     }
+                //     Ok(base.to_typeref())
+                // } else {
+                //     Err(Error::Semantic(
+                //         "Function call to non function pointer".into(),
+                //     ))
+                // }
+                todo!()
             }
             Expr::Assign(d, e) | Expr::AssignOp(d, _, e) => {
-                d.check_type();
-                e.check_type();
-                let td = d.get_type(type_table)?;
-                let te = e.get_type(type_table)?;
+                let td = d.check_type(type_table)?;
+                let te = e.check_type(type_table)?;
 
-                if te != td {
-                    e.cast_to(td.to_typeref())?;
-                }
-                Ok(td.to_typeref())
+                // if te != td {
+                //     e.cast_to(td.to_typeref())?;
+                // }
+                // Ok(td.to_typeref())
+                todo!()
             }
             Expr::BinOp(_, e1, e2) => {
                 let t1 = e1.get_type(type_table)?;
                 let t2 = e2.get_type(type_table)?;
 
-                if t1 != t2 {
-                    let tt = implicit_conversion(Rc::clone(&t1), Rc::clone(&t2))?;
-                    if tt != t1 {
-                        e1.cast_to(tt.to_typeref())?;
-                    }
-                    if tt != t2 {
-                        e2.cast_to(tt.to_typeref())?;
-                    }
-                    Ok(tt.to_typeref())
-                } else {
-                    Ok(t1.to_typeref())
-                }
+                // if t1 != t2 {
+                //     let tt = implicit_conversion(Rc::clone(&t1), Rc::clone(&t2))?;
+                //     if tt != t1 {
+                //         e1.cast_to(tt.to_typeref())?;
+                //     }
+                //     if tt != t2 {
+                //         e2.cast_to(tt.to_typeref())?;
+                //     }
+                //     Ok(tt.to_typeref())
+                // } else {
+                //     Ok(t1.to_typeref())
+                // }
+                todo!()
             }
             Expr::Member(e, f) => {
                 let t = e.get_type(type_table)?;
-                Ok(t.get_field_type(f, type_table)?.to_typeref())
+                t.get_field(f)
             }
             Expr::Addr(e) => {
-                Ok(TypeRef::Pointer { base: Box::new(type_table.get(k)) })
+                // Ok(TypeRef::Pointer { base: Box::new(type_table.get(k)) })
+                todo!()
             }
             e => todo!("{:?}", e),
         }
     }
 
-    fn cast_to(&mut self, ty: TypeRef) -> Result<(), Error> {
+    fn cast_to<'a>(&mut self, ty: TypeCell<'a>) -> Result<(), Error> {
         let dummy = Expr::Primary(Primary::Integer(Integer(0)));
         let expr = std::mem::replace(self, dummy);
-        *self = Expr::Cast(ty, Box::new(expr));
+        *self = Expr::Cast(ty.to_typeref(), Box::new(expr));
 
         Ok(())
     }
 }
 
 impl Primary {
-    fn check_type(&mut self, type_table: &TypeTable) -> Result<TypeRef, Error> {
+    fn check_type<'a>(&mut self, type_table: &TypeTable<'a>) -> Result<TypeCell<'a>, Error> {
         match self {
-            Primary::Integer(_) => Ok(TypeRef::Long),
-            Primary::Character(_) => Ok(TypeRef::Char),
-            Primary::String(_) => Ok(TypeRef::Array {
-                base: Box::new(TypeRef::Char),
-                size: None,
-            }),
-            Primary::Variable(v) => Ok(v.get_entity().unwrap().get_type().clone()),
             Primary::Expr(e) => e.check_type(type_table),
+            p => p.get_type(type_table)
         }
     }
 }
@@ -205,6 +216,7 @@ mod tests {
             if let Some(p) = file_name.parent() {
                 header_paths.push(p.to_str().unwrap());
             }
+            let arena = crate::types::TypeArena::new();
             let mut ast = parse_source(&code, &header_paths).unwrap();
             let scope = resolve_variables(&mut ast);
             if scope.is_err() {
@@ -212,7 +224,7 @@ mod tests {
                 continue;
             }
 
-            let table = resolve_types(&mut ast);
+            let table = resolve_types(&mut ast, &arena);
             if table.is_err() {
                 dbg!(&table);
                 continue;

@@ -2,7 +2,10 @@ use crate::ast::*;
 use crate::error::Error;
 use crate::types::{TypeCell, TypeTable};
 
-pub fn check_dereference<'a>(ast: &Source, type_table: &'a TypeTable<'a>) -> Result<(), Error> {
+pub fn check_dereference<'a, 'b>(
+    ast: &Source,
+    type_table: &'a TypeTable<'a, 'b>,
+) -> Result<(), Error> {
     for defs in &ast.1 {
         match defs {
             TopDef::DefVars(DefVars(_, _, defs)) | TopDef::DefConst(DefVars(_, _, defs)) => {
@@ -28,7 +31,7 @@ pub fn check_dereference<'a>(ast: &Source, type_table: &'a TypeTable<'a>) -> Res
 }
 
 impl Statement {
-    fn check_deref<'a>(&self, type_table: &'a TypeTable<'a>) -> Result<(), Error> {
+    fn check_deref<'a, 'b>(&self, type_table: &'a TypeTable<'a, 'b>) -> Result<(), Error> {
         match self {
             Statement::Expr(e) => e.check_deref(type_table),
             Statement::Block(b) => b.check_deref(type_table),
@@ -72,7 +75,7 @@ impl Statement {
 }
 
 impl Block {
-    fn check_deref<'a>(&self, type_table: &'a TypeTable<'a>) -> Result<(), Error> {
+    fn check_deref<'a, 'b>(&self, type_table: &'a TypeTable<'a, 'b>) -> Result<(), Error> {
         for vars in self.ref_vars() {
             for (_, expr) in &vars.2 {
                 if let Some(expr) = expr {
@@ -89,7 +92,7 @@ impl Block {
 }
 
 impl Expr {
-    fn check_deref<'a>(&self, type_table: &'a TypeTable<'a>) -> Result<(), Error> {
+    fn check_deref<'a, 'b>(&self, type_table: &'a TypeTable<'a, 'b>) -> Result<(), Error> {
         match self {
             Expr::Assign(t, e) | Expr::AssignOp(t, _, e) => {
                 if !t.is_assignable(type_table)? {
@@ -168,12 +171,12 @@ impl Expr {
         }
     }
 
-    fn is_assignable<'a>(&self, type_table: &'a TypeTable<'a>) -> Result<bool, Error> {
+    fn is_assignable<'a, 'b>(&self, type_table: &'a TypeTable<'a, 'b>) -> Result<bool, Error> {
         let t = self.get_type(type_table)?;
         Ok(!t.is_array() && !t.is_function())
     }
 
-    pub fn get_type<'a>(&self, type_table: &TypeTable<'a>) -> Result<TypeCell<'a>, Error> {
+    pub fn get_type<'a, 'b>(&self, type_table: &TypeTable<'a, 'b>) -> Result<TypeCell<'a>, Error> {
         match self {
             Expr::BinOp(_, e, _) => e.get_type(type_table),
             Expr::Cast(t, _) => {
@@ -186,8 +189,8 @@ impl Expr {
             Expr::Primary(p) => p.get_type(type_table),
             Expr::ArrayRef(e, _) => {
                 let t = e.get_type(type_table)?;
-                t.array_base().ok_or(
-                    Error::Semantic(format!("Invalid dereference: {:?}", self)))
+                t.array_base()
+                    .ok_or(Error::Semantic(format!("Invalid dereference: {:?}", self)))
             }
             Expr::Deref(e) => {
                 let t = e.get_type(type_table)?;
@@ -239,7 +242,7 @@ impl Primary {
         }
     }
 
-    pub fn get_type<'a>(&self, type_table: &TypeTable<'a>) -> Result<TypeCell<'a>, Error> {
+    pub fn get_type<'a, 'b>(&self, type_table: &TypeTable<'a, 'b>) -> Result<TypeCell<'a>, Error> {
         match self {
             Primary::Variable(v) => {
                 let entity = if let Some(e) = v.get_entity() {
@@ -294,7 +297,7 @@ mod tests {
                 continue;
             }
             let arena = crate::types::TypeArena::new();
-            let table = resolve_types(&mut ast, &arena);
+            let table = resolve_types(&ast, &arena);
             if table.is_err() {
                 dbg!(table).ok();
                 continue;
