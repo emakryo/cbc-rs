@@ -948,7 +948,14 @@ fn func_decl<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Declaration> {
                 tuple((sp, char(')'), sp, char(';'))),
             ),
         )),
-        |(t, n, p)| Declaration::FuncDecl(t, n, p),
+        |(t, n, p)| {
+            Declaration::FuncDecl(Defun {
+                storage: Storage { static_: false },
+                type_: t,
+                name: n,
+                params: p,
+            })
+        },
     )(i)
 }
 

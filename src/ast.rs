@@ -254,7 +254,7 @@ pub enum Declaration {
     DefVar(DefVar),
     VarDecl(DefVar),
     Defun(Defun, Block),
-    FuncDecl(TypeRef, Ident, Params),
+    FuncDecl(Defun),
     DefConst(DefVar),
     DefStuct(Ident, Vec<(TypeRef, Ident)>),
     DefUnion(Ident, Vec<(TypeRef, Ident)>),

@@ -20,8 +20,12 @@ pub fn resolve_variables(ast: &mut Ast) -> Result<GlobalScope, Error> {
             Declaration::DefVar(def) | Declaration::VarDecl(def) | Declaration::DefConst(def) => {
                 global.add_variable(def.name.to_string(), def.type_.clone())?;
             }
-            Declaration::FuncDecl(t, name, p) => {
-                global.add_function(name.to_string(), t.clone(), p.clone())?;
+            Declaration::FuncDecl(defun) => {
+                global.add_function(
+                    defun.name.to_string(),
+                    defun.type_.clone(),
+                    defun.params.clone(),
+                )?;
             }
             Declaration::DefStuct(_, _)
             | Declaration::DefUnion(_, _)

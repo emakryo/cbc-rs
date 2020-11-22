@@ -1,5 +1,5 @@
 use crate::ast::{DefVar, Defun};
-use crate::entity::Entity;
+use crate::entity::{Entity, GlobalScope};
 
 pub enum Statement {
     Assign {
@@ -81,8 +81,9 @@ pub struct Label(String);
 
 pub enum Constant {}
 
-pub struct IR {
+pub struct IR<'a> {
     pub defvars: Vec<(DefVar, Option<Expr>)>,
     pub defuns: Vec<(Defun, Vec<Statement>)>,
-    pub funcdecls: Vec<String>,
+    pub funcdecls: Vec<Defun>,
+    pub scope: &'a GlobalScope,
 }

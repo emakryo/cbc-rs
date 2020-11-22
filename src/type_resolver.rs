@@ -33,8 +33,8 @@ pub fn resolve_types<'a, 'b>(
                 }
                 block.resolve_types(&mut type_table)?;
             }
-            Declaration::FuncDecl(typeref, ..) => {
-                type_table.add(typeref.clone())?;
+            Declaration::FuncDecl(defun) => {
+                type_table.add(defun.type_.clone())?;
             }
         }
     }
