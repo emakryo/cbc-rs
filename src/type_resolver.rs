@@ -9,7 +9,7 @@ pub fn resolve_types<'a, 'b>(
 ) -> Result<TypeTable<'a, 'b>, Error> {
     let mut type_table = TypeTable::new(arena);
 
-    for (_, decls) in &ast.0 {
+    for (_, decls) in &ast.imports {
         for decl in decls {
             match decl {
                 HeaderDecl::TypeDef(typeref, n) => {
@@ -32,7 +32,7 @@ pub fn resolve_types<'a, 'b>(
         }
     }
 
-    for def in &ast.1 {
+    for def in &ast.defs {
         match def {
             TopDef::TypeDef(typeref, n) => {
                 type_table.add_usertype(n.clone(), typeref.clone())?;

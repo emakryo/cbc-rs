@@ -146,7 +146,7 @@ fn new_scope(parent: Rc<RefCell<LocalScope>>) -> Rc<RefCell<LocalScope>> {
 pub fn resolve_variables(ast: &mut Source) -> Result<GlobalScope, Error> {
     let mut global = GlobalScope::new();
 
-    for decls in ast.0.values() {
+    for decls in ast.imports.values() {
         for decl in decls {
             match decl {
                 HeaderDecl::VarsDecl(vs) | HeaderDecl::DefConst(vs) => {
@@ -163,7 +163,7 @@ pub fn resolve_variables(ast: &mut Source) -> Result<GlobalScope, Error> {
         }
     }
 
-    for def in &mut ast.1 {
+    for def in &mut ast.defs {
         match def {
             TopDef::Defun(_, t, name, param, block) => {
                 let scope = global.add_function(name.to_string(), t.clone(), param.clone())?;
@@ -183,7 +183,7 @@ pub fn resolve_variables(ast: &mut Source) -> Result<GlobalScope, Error> {
         }
     }
 
-    for def in &mut ast.1 {
+    for def in &mut ast.defs {
         match def {
             TopDef::Defun(_, _, _, _, block) => {
                 block.resolve_variables(block.get_scope().expect("No scope set"))?;

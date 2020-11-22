@@ -254,7 +254,11 @@ pub struct Import {
 pub type ImportMap = HashMap<Import, Vec<HeaderDecl>>;
 
 #[derive(Debug)]
-pub struct Source(pub ImportMap, pub Vec<TopDef>, pub TypeMap);
+pub struct Source {
+    pub imports: ImportMap,
+    pub defs: Vec<TopDef>,
+    pub type_alias: TypeMap,
+}
 
 #[derive(Debug)]
 pub enum HeaderDecl {

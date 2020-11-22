@@ -6,7 +6,7 @@ pub fn check_dereference<'a, 'b>(
     ast: &Source,
     type_table: &'a TypeTable<'a, 'b>,
 ) -> Result<(), Error> {
-    for defs in &ast.1 {
+    for defs in &ast.defs {
         match defs {
             TopDef::DefVars(DefVars(_, _, defs)) | TopDef::DefConst(DefVars(_, _, defs)) => {
                 for (_, expr) in defs {

@@ -898,7 +898,7 @@ pub fn parse_source<P: AsRef<Path>>(i: &str, import_paths: &[P]) -> Result<Sourc
         }
     }
 
-    Ok(Source(imports, top_defs, types))
+    Ok(Source{ imports, defs: top_defs, type_alias: types})
 }
 
 fn func_decl<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, HeaderDecl> {

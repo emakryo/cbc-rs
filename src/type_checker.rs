@@ -74,7 +74,7 @@ impl Statement {
 }
 
 impl Expr {
-    fn check_type<'a>(&mut self, type_table: &TypeTable<'a>) -> Result<TypeCell<'a>, Error> {
+    fn check_type<'a, 'b>(&mut self, type_table: &TypeTable<'a, 'b>) -> Result<TypeCell<'a>, Error> {
         match self {
             Expr::Primary(p) => p.check_type(type_table),
             Expr::Call(e, args) => {
@@ -182,7 +182,7 @@ impl Expr {
 }
 
 impl Primary {
-    fn check_type<'a>(&mut self, type_table: &TypeTable<'a>) -> Result<TypeCell<'a>, Error> {
+    fn check_type<'a, 'b>(&mut self, type_table: &TypeTable<'a, 'b>) -> Result<TypeCell<'a>, Error> {
         match self {
             Primary::Expr(e) => e.check_type(type_table),
             p => p.get_type(type_table)
@@ -198,6 +198,44 @@ mod tests {
     use crate::type_resolver::resolve_types;
     use crate::variable_resolver::resolve_variables;
 
+    fn test_from_file(file_name: std::path::Path) {
+        dbg!(&file_name);
+        let mut code = String::new();
+        std::fs::File::open(&file_name)
+            .unwrap()
+            .read_to_string(&mut code)
+            .unwrap();
+        let mut header_paths = vec!["cbc-1.0/import"];
+        if let Some(p) = file_name.parent() {
+            header_paths.push(p.to_str().unwrap());
+        }
+        let arena = crate::types::TypeArena::new();
+        let mut ast = parse_source(&code, &header_paths).unwrap();
+        let scope = resolve_variables(&mut ast);
+        if scope.is_err() {
+            dbg!(scope).ok();
+            return;
+        }
+
+        let table = resolve_types(&mut ast, &arena);
+        if table.is_err() {
+            dbg!(&table);
+            return;
+        }
+
+        let table = table.unwrap();
+        let deref = check_dereference(&ast, &table);
+        if deref.is_err() {
+            dbg!(&deref);
+            return;
+        }
+
+        let type_check = check_type(&mut ast, &table);
+        if type_check.is_err() {
+            dbg!(&type_check);
+        }
+    }
+
     #[test]
     fn test_from_files() {
         use std::io::Read;
@@ -206,41 +244,6 @@ mod tests {
 
         for file_name in glob::glob(&format!("{}/cbc-1.0/test/*.cb", root)).unwrap() {
             let file_name = file_name.unwrap();
-            dbg!(&file_name);
-            let mut code = String::new();
-            std::fs::File::open(&file_name)
-                .unwrap()
-                .read_to_string(&mut code)
-                .unwrap();
-            let mut header_paths = vec!["cbc-1.0/import"];
-            if let Some(p) = file_name.parent() {
-                header_paths.push(p.to_str().unwrap());
-            }
-            let arena = crate::types::TypeArena::new();
-            let mut ast = parse_source(&code, &header_paths).unwrap();
-            let scope = resolve_variables(&mut ast);
-            if scope.is_err() {
-                dbg!(scope).ok();
-                continue;
-            }
-
-            let table = resolve_types(&mut ast, &arena);
-            if table.is_err() {
-                dbg!(&table);
-                continue;
-            }
-
-            let table = table.unwrap();
-            let deref = check_dereference(&ast, &table);
-            if deref.is_err() {
-                dbg!(&deref);
-                continue;
-            }
-
-            let type_check = check_type(&mut ast, &table);
-            if type_check.is_err() {
-                dbg!(&type_check);
-            }
         }
     }
 }
