@@ -1,5 +1,5 @@
+use crate::entity::{Entity, LocalScope};
 use crate::types::TypeRef;
-use crate::variable_resolver::{Entity, LocalScope};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -237,9 +237,11 @@ pub struct Params {
 }
 
 #[derive(Debug, Eq, PartialEq)]
-pub enum TopDef {
-    Defun(Storage, TypeRef, Ident, Params, Block),
+pub enum Declarations {
     DefVars(DefVars),
+    VarsDecl(DefVars),
+    Defun(Storage, TypeRef, Ident, Params, Block),
+    FuncDecl(TypeRef, Ident, Params),
     DefConst(DefVars),
     DefStuct(Ident, Vec<(TypeRef, Ident)>),
     DefUnion(Ident, Vec<(TypeRef, Ident)>),
@@ -248,15 +250,13 @@ pub enum TopDef {
 
 #[derive(Debug, Eq, PartialEq, Hash)]
 pub struct Import {
-    pub lib_id: String,
+    pub libid: String,
 }
 
-pub type ImportMap = HashMap<Import, Vec<HeaderDecl>>;
-
 #[derive(Debug)]
-pub struct Source {
-    pub imports: ImportMap,
-    pub defs: Vec<TopDef>,
+pub struct Ast<'a> {
+    pub source: &'a str,
+    pub declarations: Vec<Declarations>,
     pub type_alias: TypeMap,
 }
 

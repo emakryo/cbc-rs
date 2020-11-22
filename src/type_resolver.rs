@@ -4,46 +4,25 @@ use crate::types::{TypeArena, TypeCell, TypeTable};
 use std::collections::HashSet;
 
 pub fn resolve_types<'a, 'b>(
-    ast: &'b Source,
+    ast: &'b Ast,
     arena: &'a TypeArena<'a>,
 ) -> Result<TypeTable<'a, 'b>, Error> {
     let mut type_table = TypeTable::new(arena);
 
-    for (_, decls) in &ast.imports {
-        for decl in decls {
-            match decl {
-                HeaderDecl::TypeDef(typeref, n) => {
-                    type_table.add_usertype(n.clone(), typeref.clone())?;
-                }
-                HeaderDecl::DefStuct(_, _) => todo!(),
-                HeaderDecl::DefUnion(_, _) => todo!(),
-                HeaderDecl::FuncDecl(typeref, ..) => {
-                    type_table.add(typeref.clone())?;
-                }
-                HeaderDecl::VarsDecl(def) | HeaderDecl::DefConst(def) => {
-                    type_table.add(def.1.clone())?;
-                    for (_, e) in &def.2 {
-                        if let Some(e) = e {
-                            e.resolve_types(&mut type_table)?;
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    for def in &ast.defs {
+    for def in &ast.declarations {
         match def {
-            TopDef::TypeDef(typeref, n) => {
+            Declarations::TypeDef(typeref, n) => {
                 type_table.add_usertype(n.clone(), typeref.clone())?;
             }
-            TopDef::DefStuct(n, members) => {
+            Declarations::DefStuct(n, members) => {
                 type_table.add_struct(n.clone(), members.clone())?;
             }
-            TopDef::DefUnion(n, members) => {
+            Declarations::DefUnion(n, members) => {
                 type_table.add_union(n.clone(), members.clone())?;
             }
-            TopDef::DefVars(def) | TopDef::DefConst(def) => {
+            Declarations::DefVars(def)
+            | Declarations::VarsDecl(def)
+            | Declarations::DefConst(def) => {
                 type_table.add(def.1.clone())?;
                 for (_, e) in &def.2 {
                     if let Some(e) = e {
@@ -51,12 +30,15 @@ pub fn resolve_types<'a, 'b>(
                     }
                 }
             }
-            TopDef::Defun(_, typeref, _, params, block) => {
+            Declarations::Defun(_, typeref, _, params, block) => {
                 type_table.add(typeref.clone())?;
                 for (t, _) in &params.params {
                     type_table.add(t.clone())?;
                 }
                 block.resolve_types(&mut type_table)?;
+            }
+            Declarations::FuncDecl(typeref, ..) => {
+                type_table.add(typeref.clone())?;
             }
         }
     }

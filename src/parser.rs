@@ -13,7 +13,7 @@ use nom::{
     sequence::{delimited, pair, preceded, separated_pair, terminated, tuple},
     IResult,
 };
-use std::collections::HashMap;
+use std::collections::HashSet;
 use std::path::Path;
 
 /// Parse keyword
@@ -764,7 +764,7 @@ fn params<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Params> {
     ))(i)
 }
 
-fn defun<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, TopDef> {
+fn defun<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Declarations> {
     map(
         tuple((
             storage,
@@ -780,7 +780,7 @@ fn defun<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, TopDef> {
             ),
             preceded(sp, |i| block(i, types)),
         )),
-        |(s, t, n, p, b)| TopDef::Defun(s, t, n, p, b),
+        |(s, t, n, p, b)| Declarations::Defun(s, t, n, p, b),
     )(i)
 }
 
@@ -830,19 +830,25 @@ fn typedef<'a>(i: &'a str, types: &mut TypeMap) -> IResult<&'a str, (TypeRef, Id
     Ok((i, (t, id)))
 }
 
-fn top_def<'a>(i: &'a str, types: &mut TypeMap) -> IResult<&'a str, TopDef> {
+fn top_def<'a>(i: &'a str, types: &mut TypeMap) -> IResult<&'a str, Declarations> {
     let res = alt((
         |i| defun(i, types),
-        map(|i| defvars(i, types), TopDef::DefVars),
-        map(|i| defconst(i, types), TopDef::DefConst),
-        map(|i| defstruct(i, types), |(n, t)| TopDef::DefStuct(n, t)),
-        map(|i| defunion(i, types), |(n, t)| TopDef::DefUnion(n, t)),
+        map(|i| defvars(i, types), Declarations::DefVars),
+        map(|i| defconst(i, types), Declarations::DefConst),
+        map(
+            |i| defstruct(i, types),
+            |(n, t)| Declarations::DefStuct(n, t),
+        ),
+        map(
+            |i| defunion(i, types),
+            |(n, t)| Declarations::DefUnion(n, t),
+        ),
     ))(i);
     if res.is_ok() {
         return res;
     }
     match typedef(i, types) {
-        Ok((i, o)) => Ok((i, TopDef::TypeDef(o.0, o.1))),
+        Ok((i, o)) => Ok((i, Declarations::TypeDef(o.0, o.1))),
         Err(e) => Err(e),
     }
 }
@@ -854,26 +860,27 @@ fn import(i: &str) -> IResult<&str, Import> {
             recognize(separated_nonempty_list(char('.'), ident)),
             preceded(sp, char(';')),
         ),
-        |lib_id| Import {
-            lib_id: lib_id.to_string(),
+        |libid| Import {
+            libid: libid.to_string(),
         },
     )(i)
 }
 
-pub fn parse_source<P: AsRef<Path>>(i: &str, import_paths: &[P]) -> Result<Source, Error> {
+pub fn parse_source<'a, P: AsRef<Path>>(i: &'a str, import_paths: &[P]) -> Result<Ast<'a>, Error> {
     let mut types = TypeMap::new();
-    let mut imports = HashMap::new();
-    let mut top_defs = vec![];
+    let mut imports = HashSet::new();
+    let mut declarations = vec![];
     let mut i = i;
 
     loop {
         i = sp(i)?.0;
         match import(i) {
             Ok((j, imp)) => {
-                if !imports.contains_key(&imp) {
-                    let code = crate::library::load(&imp.lib_id, import_paths)?;
-                    let def = header(&code, import_paths, &mut imports, &mut types)?;
-                    imports.insert(imp, def);
+                if !imports.contains(&imp) {
+                    let code = crate::library::load(&imp.libid, import_paths)?;
+                    let mut def = header(&code, import_paths, &mut imports, &mut types)?;
+                    imports.insert(imp);
+                    declarations.append(&mut def);
                 }
                 i = j;
             }
@@ -889,7 +896,7 @@ pub fn parse_source<P: AsRef<Path>>(i: &str, import_paths: &[P]) -> Result<Sourc
         match top_def(i, &mut types) {
             Ok((j, d)) => {
                 i = j;
-                top_defs.push(d);
+                declarations.push(d);
             }
             _ => {
                 all_consuming(sp)(i)?;
@@ -898,10 +905,14 @@ pub fn parse_source<P: AsRef<Path>>(i: &str, import_paths: &[P]) -> Result<Sourc
         }
     }
 
-    Ok(Source{ imports, defs: top_defs, type_alias: types})
+    Ok(Ast {
+        source: i,
+        declarations,
+        type_alias: types,
+    })
 }
 
-fn func_decl<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, HeaderDecl> {
+fn func_decl<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Declarations> {
     map(
         tuple((
             preceded(tuple((keyword("extern"), sp)), |i| typeref(i, types)),
@@ -912,31 +923,37 @@ fn func_decl<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, HeaderDecl> {
                 tuple((sp, char(')'), sp, char(';'))),
             ),
         )),
-        |(t, n, p)| HeaderDecl::FuncDecl(t, n, p),
+        |(t, n, p)| Declarations::FuncDecl(t, n, p),
     )(i)
 }
 
-fn vars_decl<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, HeaderDecl> {
+fn vars_decl<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Declarations> {
     map(
         preceded(tuple((keyword("extern"), sp)), |i| defvars(i, types)),
-        |d| HeaderDecl::VarsDecl(d),
+        |d| Declarations::VarsDecl(d),
     )(i)
 }
 
-fn header_def<'a>(i: &'a str, types: &mut TypeMap) -> IResult<&'a str, HeaderDecl> {
+fn header_def<'a>(i: &'a str, types: &mut TypeMap) -> IResult<&'a str, Declarations> {
     let res = alt((
         |i| func_decl(i, types),
         |i| vars_decl(i, types),
-        map(|i| defconst(i, types), HeaderDecl::DefConst),
-        map(|i| defstruct(i, types), |(n, t)| HeaderDecl::DefStuct(n, t)),
-        map(|i| defunion(i, types), |(n, t)| HeaderDecl::DefUnion(n, t)),
+        map(|i| defconst(i, types), Declarations::DefConst),
+        map(
+            |i| defstruct(i, types),
+            |(n, t)| Declarations::DefStuct(n, t),
+        ),
+        map(
+            |i| defunion(i, types),
+            |(n, t)| Declarations::DefUnion(n, t),
+        ),
     ))(i);
     if res.is_ok() {
         return res;
     }
 
     match typedef(i, types) {
-        Ok((i, o)) => Ok((i, HeaderDecl::TypeDef(o.0, o.1))),
+        Ok((i, o)) => Ok((i, Declarations::TypeDef(o.0, o.1))),
         Err(e) => Err(e),
     }
 }
@@ -944,9 +961,9 @@ fn header_def<'a>(i: &'a str, types: &mut TypeMap) -> IResult<&'a str, HeaderDec
 fn header<P: AsRef<Path>>(
     i: &str,
     header_paths: &[P],
-    imports: &mut ImportMap,
+    imports: &mut HashSet<Import>,
     types: &mut TypeMap,
-) -> Result<Vec<HeaderDecl>, Error> {
+) -> Result<Vec<Declarations>, Error> {
     let mut i = i;
     let mut defs = vec![];
 
@@ -954,10 +971,11 @@ fn header<P: AsRef<Path>>(
         i = sp(i)?.0;
         match import(i) {
             Ok((j, imp)) => {
-                if !imports.contains_key(&imp) {
-                    let code = crate::library::load(&imp.lib_id, header_paths)?;
-                    let def = header(&code, header_paths, imports, types)?;
-                    imports.insert(imp, def);
+                if !imports.contains(&imp) {
+                    let code = crate::library::load(&imp.libid, header_paths)?;
+                    let mut def = header(&code, header_paths, imports, types)?;
+                    defs.append(&mut def);
+                    imports.insert(imp);
                 }
                 i = j;
             }
@@ -985,6 +1003,7 @@ fn header<P: AsRef<Path>>(
 #[cfg(test)]
 mod test {
     use super::*;
+    use std::collections::HashMap;
     use std::fmt::Debug;
 
     fn consumed<T: Debug>(r: IResult<&str, T>) -> T {
@@ -1125,7 +1144,7 @@ mod test {
             Ok((
                 "",
                 Import {
-                    lib_id: "foo.bar".into()
+                    libid: "foo.bar".into()
                 }
             ))
         );
@@ -1135,7 +1154,7 @@ mod test {
             Ok((
                 "   \n",
                 Import {
-                    lib_id: "foo.bar".into()
+                    libid: "foo.bar".into()
                 }
             ))
         );
@@ -1441,7 +1460,7 @@ main(int argc, char **argv)
                 header_paths.push(p.to_str().unwrap());
             }
 
-            let mut imports = ImportMap::new();
+            let mut imports = HashSet::new();
             let mut types = TypeMap::new();
 
             let res = header(&code, &header_paths, &mut imports, &mut types);

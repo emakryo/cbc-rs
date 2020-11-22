@@ -1,4 +1,4 @@
-use crate::variable_resolver::Entity;
+use crate::entity::Entity;
 
 pub enum Statement {
     Assign {

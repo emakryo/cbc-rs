@@ -3,12 +3,13 @@ use crate::error::Error;
 use crate::types::{TypeCell, TypeTable};
 
 pub fn check_dereference<'a, 'b>(
-    ast: &Source,
+    ast: &Ast,
     type_table: &'a TypeTable<'a, 'b>,
 ) -> Result<(), Error> {
-    for defs in &ast.defs {
+    for defs in &ast.declarations {
         match defs {
-            TopDef::DefVars(DefVars(_, _, defs)) | TopDef::DefConst(DefVars(_, _, defs)) => {
+            Declarations::DefVars(DefVars(_, _, defs))
+            | Declarations::DefConst(DefVars(_, _, defs)) => {
                 for (_, expr) in defs {
                     if let Some(expr) = expr.as_ref() {
                         expr.check_deref(&type_table)?;
@@ -21,10 +22,14 @@ pub fn check_dereference<'a, 'b>(
                     }
                 }
             }
-            TopDef::Defun(_, _, _, _, b) => {
+            Declarations::Defun(_, _, _, _, b) => {
                 b.check_deref(type_table)?;
             }
-            TopDef::DefStuct(_, _) | TopDef::DefUnion(_, _) | TopDef::TypeDef(_, _) => (),
+            Declarations::FuncDecl(_, _, _)
+            | Declarations::VarsDecl(_)
+            | Declarations::DefStuct(_, _)
+            | Declarations::DefUnion(_, _)
+            | Declarations::TypeDef(_, _) => (),
         }
     }
     Ok(())

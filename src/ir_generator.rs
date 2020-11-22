@@ -1,10 +1,14 @@
+use crate::ast::Ast;
+use crate::entity::GlobalScope;
+use crate::ir::{Expr, Statement};
 use crate::types::TypeTable;
-use crate::ast::Source;
-use crate::ir::{Statement, Expr};
-use crate::variable_resolver::GlobalScope;
 
-impl Source {
+impl<'a> Ast<'a> {
     pub fn transform(&self, types: &TypeTable, scope: &GlobalScope) -> Vec<Statement> {
+        for decs in &self.declarations {
+            todo!();
+        }
+
         todo!()
     }
 }

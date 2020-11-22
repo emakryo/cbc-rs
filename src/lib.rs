@@ -1,10 +1,11 @@
 pub mod ast;
 pub mod dereference_checker;
+pub mod entity;
 pub mod error;
 pub mod library;
 pub mod parser;
 pub mod types;
-//pub mod type_checker;
+// pub mod type_checker;
 pub mod ir;
 pub mod ir_generator;
 pub mod type_resolver;
