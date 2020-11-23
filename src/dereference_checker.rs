@@ -2,16 +2,16 @@ use crate::ast::*;
 use crate::error::Error;
 use crate::types::{TypeCell, TypeTable};
 
-pub fn check_dereference<'a, 'b>(
-    ast: &Ast,
-    type_table: &'a TypeTable<'a, 'b>,
+pub fn check_dereference<'a, 'b, 'c>(
+    ast: &Ast<'c, TypedExpr<'a>, TypeCell<'a>>,
+    // type_table: &'a TypeTable<'a, 'b>,
 ) -> Result<(), Error> {
     for defs in &ast.declarations {
         match defs {
             Declaration::DefVar(DefVar { init, .. })
             | Declaration::DefConst(DefVar { init, .. }) => {
                 if let Some(expr) = init.as_ref() {
-                    expr.check_deref(&type_table)?;
+                    expr.check_deref()?;
                     if !expr.is_constant() {
                         return Err(Error::Semantic(format!(
                             "Global initializer is not constant: {:?}",
@@ -21,7 +21,7 @@ pub fn check_dereference<'a, 'b>(
                 }
             }
             Declaration::Defun(_, b) => {
-                b.check_deref(type_table)?;
+                b.check_deref()?;
             }
             Declaration::FuncDecl(_)
             | Declaration::VarDecl(_)
@@ -33,39 +33,39 @@ pub fn check_dereference<'a, 'b>(
     Ok(())
 }
 
-impl Statement {
-    fn check_deref<'a, 'b>(&self, type_table: &'a TypeTable<'a, 'b>) -> Result<(), Error> {
+impl<'a> Statement<TypedExpr<'a>, TypeCell<'a>> {
+    fn check_deref<'b>(&self /*, type_table: &'a TypeTable<'a, 'b>*/) -> Result<(), Error> {
         match self {
-            Statement::Expr(e) => e.check_deref(type_table),
-            Statement::Block(b) => b.check_deref(type_table),
+            Statement::Expr(e) => e.check_deref(),
+            Statement::Block(b) => b.check_deref(),
             Statement::If(e, t, f) => {
-                e.check_deref(type_table)?;
-                t.check_deref(type_table)?;
+                e.check_deref()?;
+                t.check_deref()?;
                 if let Some(f) = f.as_ref() {
-                    f.check_deref(type_table)?;
+                    f.check_deref()?;
                 }
                 Ok(())
             }
             Statement::Return(e) => {
                 if let Some(e) = e {
-                    e.check_deref(type_table)?;
+                    e.check_deref()?;
                 }
                 Ok(())
             }
             Statement::While(e, s) | Statement::DoWhile(e, s) => {
-                e.check_deref(type_table)?;
-                s.check_deref(type_table)
+                e.check_deref()?;
+                s.check_deref()
             }
             Statement::For(i, c, s, b) => {
-                i.check_deref(type_table)?;
-                c.check_deref(type_table)?;
-                s.check_deref(type_table)?;
-                b.check_deref(type_table)
+                i.check_deref()?;
+                c.check_deref()?;
+                s.check_deref()?;
+                b.check_deref()
             }
             Statement::Switch(e, bs) => {
-                e.check_deref(type_table)?;
+                e.check_deref()?;
                 for (_, b) in bs {
-                    b.check_deref(type_table)?;
+                    b.check_deref()?;
                 }
                 Ok(())
             }
@@ -77,52 +77,55 @@ impl Statement {
     }
 }
 
-impl Block {
-    fn check_deref<'a, 'b>(&self, type_table: &'a TypeTable<'a, 'b>) -> Result<(), Error> {
+impl<'a> Block<TypedExpr<'a>, TypeCell<'a>> {
+    fn check_deref<'b>(&self /*type_table: &'a TypeTable<'a, 'b>*/) -> Result<(), Error> {
         for DefVar { init, .. } in self.ref_vars() {
             if let Some(expr) = init {
-                expr.check_deref(type_table)?;
+                expr.check_deref()?;
             }
         }
 
         for stmt in self.ref_stmts() {
-            stmt.check_deref(type_table)?;
+            stmt.check_deref()?;
         }
         Ok(())
     }
 }
 
-impl Expr {
-    fn check_deref<'a, 'b>(&self, type_table: &'a TypeTable<'a, 'b>) -> Result<(), Error> {
-        match self {
-            Expr::Assign(t, e) | Expr::AssignOp(t, _, e) => {
-                if !t.is_assignable(type_table)? {
+impl<'a> TypedExpr<'a> {
+    fn check_deref<'b>(&self /*type_table: &'a TypeTable<'a, 'b>*/) -> Result<(), Error> {
+        match &self.inner {
+            BaseExpr::Assign(t, e) | BaseExpr::AssignOp(t, _, e) => {
+                if !t.is_assignable()? {
                     return Err(Error::Semantic(format!("Not assignable: {:?}", t)));
                 }
-                e.check_deref(type_table)?;
+                e.check_deref()?;
             }
-            Expr::BinOp(_, e1, e2) => {
-                e1.check_deref(type_table)?;
-                e2.check_deref(type_table)?;
+            BaseExpr::BinOp(_, e1, e2) => {
+                e1.check_deref()?;
+                e2.check_deref()?;
             }
-            Expr::Ternary(c, t, f) => {
-                c.check_deref(type_table)?;
-                t.check_deref(type_table)?;
-                f.check_deref(type_table)?;
+            BaseExpr::Ternary(c, t, f) => {
+                c.check_deref()?;
+                t.check_deref()?;
+                f.check_deref()?;
             }
-            Expr::Cast(_, t) => t.check_deref(type_table)?,
-            Expr::PreInc(e) | Expr::PreDec(e) | Expr::PostInc(e) | Expr::PostDec(e) => {
-                e.check_deref(type_table)?;
-                if !e.is_assignable(type_table)? {
+            BaseExpr::Cast(_, t) => t.check_deref()?,
+            BaseExpr::PreInc(e)
+            | BaseExpr::PreDec(e)
+            | BaseExpr::PostInc(e)
+            | BaseExpr::PostDec(e) => {
+                e.check_deref()?;
+                if !e.is_assignable()? {
                     return Err(Error::Semantic(format!("Not assignable: {:?}", e)));
                 }
             }
-            Expr::Call(e, args) => {
-                e.check_deref(type_table)?;
+            BaseExpr::Call(e, args) => {
+                e.check_deref()?;
                 for a in &args.0 {
-                    a.check_deref(type_table)?;
+                    a.check_deref()?;
                 }
-                let t = e.get_type(type_table)?;
+                let t = &e.type_;
                 if !t.is_func_pointer() {
                     return Err(Error::Semantic(format!(
                         "Function call to non-function variable: {:?}",
@@ -130,27 +133,27 @@ impl Expr {
                     )));
                 }
             }
-            Expr::Member(e, name) => {
-                let t = e.get_type(type_table)?;
-                t.get_field(name)?;
+            BaseExpr::Member(e, name) => {
+                let t = &e.type_;
+                t.get_field(&name)?;
             }
-            Expr::PMember(e, name) => {
-                e.get_type(type_table)?
+            BaseExpr::PMember(e, name) => {
+                e.type_
                     .pointer_base()
                     .ok_or(Error::Semantic(format!(
                         "Arrow operator for non-pointer value: {:?}",
                         self
                     )))?
-                    .get_field(name)?;
+                    .get_field(&name)?;
             }
-            Expr::Addr(e) => e.check_deref(type_table)?,
-            Expr::Primary(_) => (),
-            Expr::Op(_, t) => t.check_deref(type_table)?,
-            Expr::ArrayRef(e, i) => {
-                e.check_deref(type_table)?;
-                i.check_deref(type_table)?;
+            BaseExpr::Addr(e) => e.check_deref()?,
+            BaseExpr::Primary(_) => (),
+            BaseExpr::UnaryOp(_, t) => t.check_deref()?,
+            BaseExpr::ArrayRef(e, i) => {
+                e.check_deref()?;
+                i.check_deref()?;
 
-                let t = e.get_type(type_table)?;
+                let t = &e.type_;
                 if !t.is_pointer() && !t.is_array() {
                     return Err(Error::Semantic(format!(
                         "Index access to non-array type: {:?}",
@@ -158,83 +161,83 @@ impl Expr {
                     )));
                 }
             }
-            Expr::Deref(e) => e.check_deref(type_table)?,
-            Expr::SizeofE(e) => e.check_deref(type_table)?,
-            Expr::SizeofT(_) => (),
+            BaseExpr::Deref(e) => e.check_deref()?,
+            BaseExpr::SizeofE(e) => e.check_deref()?,
+            BaseExpr::SizeofT(_) => (),
         }
         Ok(())
     }
 
     fn is_constant(&self) -> bool {
-        match self {
-            Expr::Primary(p) => p.is_constant(),
+        match &self.inner {
+            BaseExpr::Primary(p) => p.is_constant(),
             _ => false,
         }
     }
 
-    fn is_assignable<'a, 'b>(&self, type_table: &'a TypeTable<'a, 'b>) -> Result<bool, Error> {
-        let t = self.get_type(type_table)?;
+    fn is_assignable<'b>(&self /*type_table: &'a TypeTable<'a, 'b>*/) -> Result<bool, Error> {
+        let t = &self.type_;
         Ok(!t.is_array() && !t.is_function())
     }
 
-    pub fn get_type<'a, 'b>(&self, type_table: &TypeTable<'a, 'b>) -> Result<TypeCell<'a>, Error> {
-        match self {
-            Expr::BinOp(_, e, _) => e.get_type(type_table),
-            Expr::Cast(t, _) => {
-                if let Some(t) = type_table.get(t) {
-                    Ok(t.clone())
-                } else {
-                    Err(Error::Semantic(format!("Invalid type: {:?}", t)))
-                }
-            }
-            Expr::Primary(p) => p.get_type(type_table),
-            Expr::ArrayRef(e, _) => {
-                let t = e.get_type(type_table)?;
-                t.array_base()
-                    .ok_or(Error::Semantic(format!("Invalid dereference: {:?}", self)))
-            }
-            Expr::Deref(e) => {
-                let t = e.get_type(type_table)?;
-                if let Some(base) = t.pointer_base() {
-                    return Ok(base);
-                }
+    // pub fn get_type<'b>(&self, /*type_table: &TypeTable<'a, 'b>*/) -> Result<TypeCell<'a>, Error> {
+    //     match &self.inner {
+    //         BaseExpr::BinOp(_, e, _) => e.get_type(),
+    //         BaseExpr::Cast(t, _) => {
+    //             if let Some(t) = .get(t) {
+    //                 Ok(t.clone())
+    //             } else {
+    //                 Err(Error::Semantic(format!("Invalid type: {:?}", t)))
+    //             }
+    //         }
+    //         BaseExpr::Primary(p) => p.get_type(type_table),
+    //         BaseExpr::ArrayRef(e, _) => {
+    //             let t = e.get_type(type_table)?;
+    //             t.array_base()
+    //                 .ok_or(Error::Semantic(format!("Invalid dereference: {:?}", self)))
+    //         }
+    //         BaseExpr::Deref(e) => {
+    //             let t = e.get_type(type_table)?;
+    //             if let Some(base) = t.pointer_base() {
+    //                 return Ok(base);
+    //             }
 
-                Err(Error::Semantic(format!("Invalid dereference: {:?}", self)))
-            }
-            Expr::Member(e, name) => {
-                let t = e.get_type(type_table)?;
-                t.get_field(name)
-            }
-            Expr::PMember(e, name) => {
-                let t = e.get_type(type_table)?;
-                if let Some(base) = t.pointer_base() {
-                    base.get_field(name)
-                } else {
-                    Err(Error::Semantic(format!(
-                        "Arrow access to non-pointer value: {:?}",
-                        self
-                    )))
-                }
-            }
-            Expr::PostInc(e) | Expr::PostDec(e) => e.as_ref().get_type(type_table),
-            Expr::Call(e, _) => {
-                let t = e.get_type(type_table)?;
-                if let Some(base) = t.pointer_base() {
-                    if let Some(base) = base.return_type() {
-                        return Ok(base);
-                    }
-                }
-                Err(Error::Semantic(format!(
-                    "Function call to non-function variable: {:?}",
-                    self
-                )))
-            }
-            e => todo!("{:?}", e),
-        }
-    }
+    //             Err(Error::Semantic(format!("Invalid dereference: {:?}", self)))
+    //         }
+    //         BaseExpr::Member(e, name) => {
+    //             let t = e.get_type(type_table)?;
+    //             t.get_field(name)
+    //         }
+    //         BaseExpr::PMember(e, name) => {
+    //             let t = e.get_type(type_table)?;
+    //             if let Some(base) = t.pointer_base() {
+    //                 base.get_field(name)
+    //             } else {
+    //                 Err(Error::Semantic(format!(
+    //                     "Arrow access to non-pointer value: {:?}",
+    //                     self
+    //                 )))
+    //             }
+    //         }
+    //         BaseExpr::PostInc(e) | BaseExpr::PostDec(e) => e.as_ref().get_type(type_table),
+    //         BaseExpr::Call(e, _) => {
+    //             let t = e.get_type(type_table)?;
+    //             if let Some(base) = t.pointer_base() {
+    //                 if let Some(base) = base.return_type() {
+    //                     return Ok(base);
+    //                 }
+    //             }
+    //             Err(Error::Semantic(format!(
+    //                 "Function call to non-function variable: {:?}",
+    //                 self
+    //             )))
+    //         }
+    //         e => todo!("{:?}", e),
+    //     }
+    // }
 }
 
-impl Primary {
+impl<'a> Primary<TypedExpr<'a>> {
     fn is_constant(&self) -> bool {
         match self {
             Primary::Integer(_) | Primary::Character(_) | Primary::String(_) => true,
@@ -243,26 +246,26 @@ impl Primary {
         }
     }
 
-    pub fn get_type<'a, 'b>(&self, type_table: &TypeTable<'a, 'b>) -> Result<TypeCell<'a>, Error> {
-        match self {
-            Primary::Variable(v) => {
-                let entity = if let Some(e) = v.get_entity() {
-                    e
-                } else {
-                    return Err(Error::Semantic(format!("Unresolved entity: {:?}", self)));
-                };
-                let t = entity.get_type();
-                Ok(type_table
-                    .get(t)
-                    .cloned()
-                    .expect(&format!("Type must be resolved: {:?}", t)))
-            }
-            Primary::Integer(_) => Ok(type_table.long().clone()),
-            Primary::Character(_) => Ok(type_table.char().clone()),
-            Primary::String(_) => Ok(type_table.string().clone()),
-            Primary::Expr(e) => e.get_type(type_table),
-        }
-    }
+    // pub fn get_type<'b>(&self, type_table: &TypeTable<'a, 'b>) -> Result<TypeCell<'a>, Error> {
+    //     match self {
+    //         Primary::Variable(v) => {
+    //             let entity = if let Some(e) = v.get_entity() {
+    //                 e
+    //             } else {
+    //                 return Err(Error::Semantic(format!("Unresolved entity: {:?}", self)));
+    //             };
+    //             let t = entity.get_type();
+    //             Ok(type_table
+    //                 .get(t)
+    //                 .cloned()
+    //                 .expect(&format!("Type must be resolved: {:?}", t)))
+    //         }
+    //         Primary::Integer(_) => Ok(type_table.long().clone()),
+    //         Primary::Character(_) => Ok(type_table.char().clone()),
+    //         Primary::String(_) => Ok(type_table.string().clone()),
+    //         Primary::Expr(e) => e.get_type(type_table),
+    //     }
+    // }
 }
 
 #[cfg(test)]
@@ -298,14 +301,14 @@ mod tests {
                 continue;
             }
             let arena = crate::types::TypeArena::new();
-            let table = resolve_types(&ast, &arena);
-            if table.is_err() {
-                dbg!(table).ok();
+            let ast = resolve_types(ast, &arena, &scope.unwrap());
+            if ast.is_err() {
+                dbg!(ast).ok();
                 continue;
             }
-            let table = table.unwrap();
+            let ast = ast.unwrap();
 
-            let verdict = check_dereference(&ast, &table);
+            let verdict = check_dereference(&ast);
             if verdict.is_err() {
                 dbg!(verdict).ok();
             }

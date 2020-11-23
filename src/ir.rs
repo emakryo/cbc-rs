@@ -1,6 +1,8 @@
 use crate::ast::{DefVar, Defun};
-use crate::entity::{Entity, GlobalScope};
+use crate::entity::Entity;
+use crate::types::TypeRef;
 
+#[derive(Debug)]
 pub enum Statement {
     Assign {
         lhs: Expr,
@@ -22,6 +24,7 @@ pub enum Statement {
     Return(Expr),
 }
 
+#[derive(Debug)]
 pub enum Expr {
     UniOp {
         op: UniOp,
@@ -43,6 +46,7 @@ pub enum Expr {
     Str(String),
 }
 
+#[derive(Debug)]
 pub enum UniOp {
     Neg,
     BitNot,
@@ -51,6 +55,7 @@ pub enum UniOp {
     UCast,
 }
 
+#[derive(Debug)]
 pub enum BinOp {
     Add,
     Sub,
@@ -77,13 +82,15 @@ pub enum BinOp {
     ULtEq,
 }
 
+#[derive(Debug)]
 pub struct Label(String);
 
+#[derive(Debug)]
 pub enum Constant {}
 
-pub struct IR<'a> {
-    pub defvars: Vec<(DefVar, Option<Expr>)>,
+#[derive(Debug)]
+pub struct IR {
+    pub defvars: Vec<(DefVar<Expr, TypeRef>, Option<Expr>)>,
     pub defuns: Vec<(Defun, Vec<Statement>)>,
     pub funcdecls: Vec<Defun>,
-    pub scope: &'a GlobalScope,
 }

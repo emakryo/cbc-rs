@@ -117,8 +117,25 @@ impl LocalScope {
     pub fn add_variable(&mut self, name: String, type_: TypeRef) -> Result<(), Error> {
         self.add_entity(name.clone(), Entity::var(name, type_))
     }
+}
 
-    pub fn get_entity(&self, name: &str) -> Option<Rc<Entity>> {
+pub fn new_scope(parent: Rc<RefCell<LocalScope>>) -> Rc<RefCell<LocalScope>> {
+    let child = Rc::new(RefCell::new(LocalScope {
+        entities: HashMap::new(),
+        children: Vec::new(),
+        parent: Some(Rc::clone(&parent)),
+    }));
+
+    parent.borrow_mut().children.push(Rc::clone(&child));
+    child
+}
+
+pub trait Scope {
+    fn get_entity(&self, name: &str) -> Option<Rc<Entity>>;
+}
+
+impl Scope for LocalScope {
+    fn get_entity(&self, name: &str) -> Option<Rc<Entity>> {
         if let Some(var) = self.entities.get(name) {
             Some(Rc::clone(var))
         } else {
@@ -131,13 +148,9 @@ impl LocalScope {
     }
 }
 
-pub fn new_scope(parent: Rc<RefCell<LocalScope>>) -> Rc<RefCell<LocalScope>> {
-    let child = Rc::new(RefCell::new(LocalScope {
-        entities: HashMap::new(),
-        children: Vec::new(),
-        parent: Some(Rc::clone(&parent)),
-    }));
-
-    parent.borrow_mut().children.push(Rc::clone(&child));
-    child
+impl Scope for GlobalScope {
+    fn get_entity(&self, name: &str) -> Option<Rc<Entity>> {
+        let scope = self.root.borrow();
+        scope.get_entity(name)
+    }
 }

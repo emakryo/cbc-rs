@@ -7,6 +7,6 @@ pub mod parser;
 pub mod types;
 // pub mod type_checker;
 pub mod ir;
-pub mod ir_generator;
+// pub mod ir_generator;
 pub mod type_resolver;
 pub mod variable_resolver;

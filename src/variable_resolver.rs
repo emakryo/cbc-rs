@@ -1,10 +1,11 @@
 use crate::ast::*;
-use crate::entity::{new_scope, GlobalScope, LocalScope};
+use crate::entity::{new_scope, GlobalScope, LocalScope, Scope};
 use crate::error::Error;
+use crate::types::TypeRef;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-pub fn resolve_variables(ast: &mut Ast) -> Result<GlobalScope, Error> {
+pub fn resolve_variables(ast: &mut Ast<Expr, TypeRef>) -> Result<GlobalScope, Error> {
     let mut global = GlobalScope::new();
 
     for def in &mut ast.declarations {
@@ -60,7 +61,7 @@ pub fn resolve_variables(ast: &mut Ast) -> Result<GlobalScope, Error> {
     Ok(global)
 }
 
-impl Block {
+impl Block<Expr, TypeRef> {
     fn resolve_variables(&mut self, scope: Rc<RefCell<LocalScope>>) -> Result<(), Error> {
         for var in self.mut_vars() {
             scope
@@ -80,7 +81,7 @@ impl Block {
     }
 }
 
-impl Statement {
+impl Statement<Expr, TypeRef> {
     fn resolve_variables(&mut self, scope: Rc<RefCell<LocalScope>>) -> Result<(), Error> {
         macro_rules! resolve {
             ($e:expr) => {
@@ -142,51 +143,51 @@ impl Expr {
             };
         }
 
-        match self {
-            Expr::Assign(t, e) => {
+        match &mut self.inner {
+            BaseExpr::Assign(t, e) => {
                 resolve!(t);
                 resolve!(e);
             }
-            Expr::AssignOp(t, _, e) => {
+            BaseExpr::AssignOp(t, _, e) => {
                 resolve!(t);
                 resolve!(e);
             }
-            Expr::BinOp(_, e1, e2) => {
+            BaseExpr::BinOp(_, e1, e2) => {
                 resolve!(e1.as_mut());
                 resolve!(e2.as_mut());
             }
-            Expr::Ternary(c, e1, e2) => {
+            BaseExpr::Ternary(c, e1, e2) => {
                 resolve!(c.as_mut());
                 resolve!(e1.as_mut());
                 resolve!(e2.as_mut());
             }
-            Expr::Cast(_, t) => resolve!(t.as_mut()),
-            Expr::Call(e, a) => {
+            BaseExpr::Cast(_, t) => resolve!(t.as_mut()),
+            BaseExpr::Call(e, a) => {
                 resolve!(e.as_mut());
                 resolve!(a);
             }
-            Expr::Primary(p) => resolve!(p),
-            Expr::Member(e, _) => resolve!(e.as_mut()),
-            Expr::PMember(e, _) => resolve!(e.as_mut()),
-            Expr::Addr(e) => resolve!(e.as_mut()),
-            Expr::PostInc(e) => resolve!(e.as_mut()),
-            Expr::PostDec(e) => resolve!(e.as_mut()),
-            Expr::Op(_, e) => resolve!(e.as_mut()),
-            Expr::ArrayRef(e, i) => {
+            BaseExpr::Primary(p) => resolve!(p),
+            BaseExpr::Member(e, _) => resolve!(e.as_mut()),
+            BaseExpr::PMember(e, _) => resolve!(e.as_mut()),
+            BaseExpr::Addr(e) => resolve!(e.as_mut()),
+            BaseExpr::PostInc(e) => resolve!(e.as_mut()),
+            BaseExpr::PostDec(e) => resolve!(e.as_mut()),
+            BaseExpr::UnaryOp(_, e) => resolve!(e.as_mut()),
+            BaseExpr::ArrayRef(e, i) => {
                 resolve!(e.as_mut());
                 resolve!(i.as_mut());
             }
-            Expr::Deref(e) => resolve!(e.as_mut()),
-            Expr::PreInc(e) => resolve!(e.as_mut()),
-            Expr::PreDec(e) => resolve!(e.as_mut()),
-            Expr::SizeofE(e) => resolve!(e.as_mut()),
-            Expr::SizeofT(_) => (),
+            BaseExpr::Deref(e) => resolve!(e.as_mut()),
+            BaseExpr::PreInc(e) => resolve!(e.as_mut()),
+            BaseExpr::PreDec(e) => resolve!(e.as_mut()),
+            BaseExpr::SizeofE(e) => resolve!(e.as_mut()),
+            BaseExpr::SizeofT(_) => (),
         }
         Ok(())
     }
 }
 
-impl Primary {
+impl Primary<Expr> {
     fn resolve_variables(&mut self, scope: Rc<RefCell<LocalScope>>) -> Result<(), Error> {
         match self {
             Primary::Variable(v) => {
@@ -205,7 +206,7 @@ impl Primary {
     }
 }
 
-impl Args {
+impl Args<Expr> {
     fn resolve_variables(&mut self, scope: Rc<RefCell<LocalScope>>) -> Result<(), Error> {
         (&mut self.0)
             .into_iter()

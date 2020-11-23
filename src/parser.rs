@@ -256,7 +256,7 @@ fn term<'a>(i: &'a str, types: &'_ TypeMap) -> IResult<&'a str, Expr> {
                 ),
                 preceded(sp, |i: &'a str| term(i, types)),
             )),
-            |(ty, tm)| Expr::Cast(ty, Box::new(tm)),
+            |(ty, tm)| Expr::cast(ty, tm),
         ),
         |i| unary(i, types),
     ))(i)
@@ -279,7 +279,7 @@ pub enum Postfix {
     ArrayRef(Box<Expr>),
     Member(Ident),
     PMember(Ident),
-    Call(Args),
+    Call(Args<Expr>),
 }
 
 fn unary<'a>(i: &'a str, types: &'_ TypeMap) -> IResult<&'a str, Expr> {
@@ -287,20 +287,16 @@ fn unary<'a>(i: &'a str, types: &'_ TypeMap) -> IResult<&'a str, Expr> {
     let term = |i: &'a str| term(i, types);
     alt((
         map(preceded(tag("++"), preceded(sp, unary)), |u| {
-            Expr::PreInc(Box::new(u))
+            Expr::pre_inc(u)
         }),
         map(preceded(tag("--"), preceded(sp, unary)), |u| {
-            Expr::PreDec(Box::new(u))
+            Expr::pre_dec(u)
         }),
         map(tuple((unary_op, preceded(sp, term))), |(op, t)| {
-            Expr::Op(op, Box::new(t))
+            Expr::op(op, t)
         }),
-        map(preceded(char('*'), preceded(sp, term)), |t| {
-            Expr::Deref(Box::new(t))
-        }),
-        map(preceded(char('&'), preceded(sp, term)), |t| {
-            Expr::Addr(Box::new(t))
-        }),
+        map(preceded(char('*'), preceded(sp, term)), |t| Expr::deref(t)),
+        map(preceded(char('&'), preceded(sp, term)), |t| Expr::addr(t)),
         map(
             preceded(
                 keyword("sizeof"),
@@ -310,21 +306,21 @@ fn unary<'a>(i: &'a str, types: &'_ TypeMap) -> IResult<&'a str, Expr> {
                     preceded(sp, char(')')),
                 ),
             ),
-            |t| Expr::SizeofT(t),
+            |t| Expr::sizeof_type(t),
         ),
         map(preceded(keyword("sizeof"), preceded(sp, unary)), |u| {
-            Expr::SizeofE(Box::new(u))
+            Expr::sizeof_expr(u)
         }),
         map(
             tuple((|i| primary(i, types), many0(|i| postfix(i, types)))),
             |(pr, pfs)| {
-                pfs.into_iter().fold(Expr::Primary(pr), |u, pf| match pf {
-                    Postfix::Inc => Expr::PostInc(Box::new(u)),
-                    Postfix::Dec => Expr::PostDec(Box::new(u)),
-                    Postfix::ArrayRef(e) => Expr::ArrayRef(Box::new(u), e),
-                    Postfix::Member(n) => Expr::Member(Box::new(u), n),
-                    Postfix::PMember(n) => Expr::PMember(Box::new(u), n),
-                    Postfix::Call(a) => Expr::Call(Box::new(u), a),
+                pfs.into_iter().fold(Expr::primary(pr), |u, pf| match pf {
+                    Postfix::Inc => Expr::post_inc(u),
+                    Postfix::Dec => Expr::post_dec(u),
+                    Postfix::ArrayRef(e) => Expr::array_ref(u, e),
+                    Postfix::Member(n) => Expr::member(u, n),
+                    Postfix::PMember(n) => Expr::p_member(u, n),
+                    Postfix::Call(a) => Expr::call(u, a),
                 })
             },
         ),
@@ -360,7 +356,7 @@ fn postfix<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Postfix> {
     ))(i)
 }
 
-fn primary<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Primary> {
+fn primary<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Primary<Expr>> {
     alt((
         map(integer, Primary::Integer),
         map(character, Primary::Character),
@@ -377,7 +373,7 @@ fn primary<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Primary> {
     ))(i)
 }
 
-fn args<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Args> {
+fn args<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Args<Expr>> {
     map(
         opt(separated_nonempty_list(
             preceded(sp, char(',')),
@@ -413,7 +409,7 @@ fn expr<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Expr> {
                 preceded(sp, char('=')),
                 preceded(sp, |i| expr(i, types)),
             ),
-            |(t, e)| Expr::Assign(Box::new(t), Box::new(e)),
+            |(t, e)| Expr::assign(t, e),
         ),
         map(
             tuple((
@@ -421,7 +417,7 @@ fn expr<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Expr> {
                 preceded(sp, assign_op),
                 preceded(sp, |i| expr(i, types)),
             )),
-            |(t, a, e)| Expr::AssignOp(Box::new(t), a, Box::new(e)),
+            |(t, a, e)| Expr::assign_op(t, a, e),
         ),
         |i| expr10(i, types),
     ))(i)
@@ -437,7 +433,7 @@ fn expr10<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Expr> {
             ))),
         )),
         |(e1, ternary)| match ternary {
-            Some((e2, e3)) => Expr::Ternary(Box::new(e1), Box::new(e2), Box::new(e3)),
+            Some((e2, e3)) => Expr::ternary(e1, e2, e3),
             None => e1,
         },
     )(i)
@@ -453,7 +449,7 @@ fn expr9<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Expr> {
             )),
         )),
         |(e1, e2)| match e2 {
-            Some(e2) => Expr::BinOp(BinOp::LogicalOr, Box::new(e1), Box::new(e2)),
+            Some(e2) => Expr::bin_op(BinOp::LogicalOr, e1, e2),
             None => e1,
         },
     )(i)
@@ -469,7 +465,7 @@ fn expr8<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Expr> {
             )),
         )),
         |(e1, e2)| match e2 {
-            Some(e2) => Expr::BinOp(BinOp::LogicalAnd, Box::new(e1), Box::new(e2)),
+            Some(e2) => Expr::bin_op(BinOp::LogicalAnd, e1, e2),
             None => e1,
         },
     )(i)
@@ -494,7 +490,7 @@ fn expr7<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Expr> {
             opt(tuple((preceded(sp, cond_op), preceded(sp, expr7)))),
         )),
         |(e1, e2)| match e2 {
-            Some((op, e2)) => Expr::BinOp(op, Box::new(e1), Box::new(e2)),
+            Some((op, e2)) => Expr::bin_op(op, e1, e2),
             None => e1,
         },
     )(i)
@@ -510,7 +506,7 @@ fn expr6<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Expr> {
             )),
         )),
         |(e1, e2)| match e2 {
-            Some(e2) => Expr::BinOp(BinOp::BitwiseOr, Box::new(e1), Box::new(e2)),
+            Some(e2) => Expr::bin_op(BinOp::BitwiseOr, e1, e2),
             None => e1,
         },
     )(i)
@@ -526,7 +522,7 @@ fn expr5<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Expr> {
             )),
         )),
         |(e1, e2)| match e2 {
-            Some(e2) => Expr::BinOp(BinOp::BitwiseXor, Box::new(e1), Box::new(e2)),
+            Some(e2) => Expr::bin_op(BinOp::BitwiseXor, e1, e2),
             None => e1,
         },
     )(i)
@@ -542,7 +538,7 @@ fn expr4<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Expr> {
             )),
         )),
         |(e1, e2)| match e2 {
-            Some(e2) => Expr::BinOp(BinOp::BitwiseAnd, Box::new(e1), Box::new(e2)),
+            Some(e2) => Expr::bin_op(BinOp::BitwiseAnd, e1, e2),
             None => e1,
         },
     )(i)
@@ -558,8 +554,8 @@ fn expr3<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Expr> {
             ))),
         )),
         |(e1, e2)| match e2 {
-            Some((">>", e2)) => Expr::BinOp(BinOp::RShift, Box::new(e1), Box::new(e2)),
-            Some(("<<", e2)) => Expr::BinOp(BinOp::LShift, Box::new(e1), Box::new(e2)),
+            Some((">>", e2)) => Expr::bin_op(BinOp::RShift, e1, e2),
+            Some(("<<", e2)) => Expr::bin_op(BinOp::LShift, e1, e2),
             Some(_) => unimplemented!(),
             None => e1,
         },
@@ -577,8 +573,8 @@ fn expr2<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Expr> {
             ))),
         )),
         |(e1, e2)| match e2 {
-            Some(("+", e2)) => Expr::BinOp(BinOp::Plus, Box::new(e1), Box::new(e2)),
-            Some(("-", e2)) => Expr::BinOp(BinOp::Minus, Box::new(e1), Box::new(e2)),
+            Some(("+", e2)) => Expr::bin_op(BinOp::Plus, e1, e2),
+            Some(("-", e2)) => Expr::bin_op(BinOp::Minus, e1, e2),
             Some(_) => unimplemented!(),
             None => e1,
         },
@@ -597,16 +593,16 @@ fn expr1<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Expr> {
             ))),
         )),
         |(e1, e2)| match e2 {
-            Some(("*", e2)) => Expr::BinOp(BinOp::Mul, Box::new(e1), Box::new(e2)),
-            Some(("/", e2)) => Expr::BinOp(BinOp::Div, Box::new(e1), Box::new(e2)),
-            Some(("%", e2)) => Expr::BinOp(BinOp::Mod, Box::new(e1), Box::new(e2)),
+            Some(("*", e2)) => Expr::bin_op(BinOp::Mul, e1, e2),
+            Some(("/", e2)) => Expr::bin_op(BinOp::Div, e1, e2),
+            Some(("%", e2)) => Expr::bin_op(BinOp::Mod, e1, e2),
             Some(_) => unimplemented!(),
             None => e1,
         },
     )(i)
 }
 
-fn defvars<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Vec<DefVar>> {
+fn defvars<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Vec<DefVar<Expr, TypeRef>>> {
     map(
         tuple((
             storage,
@@ -635,7 +631,7 @@ fn defvars<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Vec<DefVar>> {
     )(i)
 }
 
-fn block<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Block> {
+fn block<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Block<Expr, TypeRef>> {
     map(
         delimited(
             char('{'),
@@ -649,7 +645,7 @@ fn block<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Block> {
     )(i)
 }
 
-fn statement<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Statement> {
+fn statement<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Statement<Expr, TypeRef>> {
     let expr = |i| expr(i, types);
     let statement = |i| statement(i, types);
     alt((
@@ -718,7 +714,10 @@ fn statement<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Statement> {
     ))(i)
 }
 
-fn cases<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Vec<(Vec<Primary>, Block)>> {
+fn cases<'a>(
+    i: &'a str,
+    types: &TypeMap,
+) -> IResult<&'a str, Vec<(Vec<Primary<Expr>>, Block<Expr, TypeRef>)>> {
     map(
         pair(
             many0(pair(
@@ -773,7 +772,7 @@ fn params<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Params> {
     ))(i)
 }
 
-fn defun<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Declaration> {
+fn defun<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Declaration<Expr, TypeRef>> {
     map(
         tuple((
             storage,
@@ -814,7 +813,7 @@ fn member_list<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Vec<(TypeRef
     )(i)
 }
 
-fn defconst<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Vec<DefVar>> {
+fn defconst<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Vec<DefVar<Expr, TypeRef>>> {
     preceded(keyword("const"), preceded(sp, |i| defvars(i, types)))(i)
 }
 
@@ -849,7 +848,10 @@ fn typedef<'a>(i: &'a str, types: &mut TypeMap) -> IResult<&'a str, (TypeRef, Id
     Ok((i, (t, id)))
 }
 
-fn top_def<'a>(i: &'a str, types: &mut TypeMap) -> IResult<&'a str, Vec<Declaration>> {
+fn top_def<'a>(
+    i: &'a str,
+    types: &mut TypeMap,
+) -> IResult<&'a str, Vec<Declaration<Expr, TypeRef>>> {
     let res = alt((
         map(|i| defun(i, types), |x| vec![x]),
         map(
@@ -891,7 +893,10 @@ fn import(i: &str) -> IResult<&str, Import> {
     )(i)
 }
 
-pub fn parse_source<'a, P: AsRef<Path>>(i: &'a str, import_paths: &[P]) -> Result<Ast<'a>, Error> {
+pub fn parse_source<'a, P: AsRef<Path>>(
+    i: &'a str,
+    import_paths: &[P],
+) -> Result<Ast<'a, Expr, TypeRef>, Error> {
     let mut types = TypeMap::new();
     let mut imports = HashSet::new();
     let mut declarations = vec![];
@@ -937,7 +942,7 @@ pub fn parse_source<'a, P: AsRef<Path>>(i: &'a str, import_paths: &[P]) -> Resul
     })
 }
 
-fn func_decl<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Declaration> {
+fn func_decl<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Declaration<Expr, TypeRef>> {
     map(
         tuple((
             preceded(tuple((keyword("extern"), sp)), |i| typeref(i, types)),
@@ -959,14 +964,17 @@ fn func_decl<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Declaration> {
     )(i)
 }
 
-fn vars_decl<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Vec<Declaration>> {
+fn vars_decl<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Vec<Declaration<Expr, TypeRef>>> {
     map(
         preceded(tuple((keyword("extern"), sp)), |i| defvars(i, types)),
         |d| d.into_iter().map(Declaration::VarDecl).collect(),
     )(i)
 }
 
-fn header_def<'a>(i: &'a str, types: &mut TypeMap) -> IResult<&'a str, Vec<Declaration>> {
+fn header_def<'a>(
+    i: &'a str,
+    types: &mut TypeMap,
+) -> IResult<&'a str, Vec<Declaration<Expr, TypeRef>>> {
     let res = alt((
         map(|i| func_decl(i, types), |x| vec![x]),
         |i| vars_decl(i, types),
@@ -998,7 +1006,7 @@ fn header<P: AsRef<Path>>(
     header_paths: &[P],
     imports: &mut HashSet<Import>,
     types: &mut TypeMap,
-) -> Result<Vec<Declaration>, Error> {
+) -> Result<Vec<Declaration<Expr, TypeRef>>, Error> {
     let mut i = i;
     let mut defs = vec![];
 
@@ -1206,8 +1214,8 @@ mod test {
             term("++x"),
             Ok((
                 "",
-                Expr::PreInc(Box::new(Expr::Primary(Primary::Variable(Variable::new(
-                    Ident("x".into())
+                Expr::pre_inc(Expr::primary(Primary::Variable(Variable::new(Ident(
+                    "x".into()
                 )))))
             ))
         );
@@ -1215,8 +1223,8 @@ mod test {
             term("x--"),
             Ok((
                 "",
-                Expr::PostDec(Box::new(Expr::Primary(Primary::Variable(Variable::new(
-                    Ident("x".into())
+                Expr::post_dec(Expr::primary(Primary::Variable(Variable::new(Ident(
+                    "x".into()
                 )))))
             ))
         );
@@ -1224,7 +1232,7 @@ mod test {
             term("(int)sizeof(short)"),
             Ok((
                 "",
-                Expr::Cast(TypeRef::Int, Box::new(Expr::SizeofT(TypeRef::Short)),)
+                Expr::cast(TypeRef::Int, Expr::sizeof_type(TypeRef::Short))
             ))
         );
 
@@ -1232,13 +1240,11 @@ mod test {
             term("foo.bar->baz"),
             Ok((
                 "",
-                Expr::PMember(
-                    Box::new(Expr::Member(
-                        Box::new(Expr::Primary(Primary::Variable(Variable::new(Ident(
-                            "foo".into()
-                        ))))),
+                Expr::p_member(
+                    Expr::member(
+                        Expr::primary(Primary::Variable(Variable::new(Ident("foo".into())))),
                         Ident("bar".into()),
-                    )),
+                    ),
                     Ident("baz".into()),
                 )
             ))

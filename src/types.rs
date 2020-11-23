@@ -1,4 +1,4 @@
-use crate::ast::{Expr, Ident};
+use crate::ast::Ident;
 use crate::error::Error;
 use std::cell::{Cell, Ref, RefCell, RefMut};
 use std::collections::HashMap;
@@ -231,70 +231,78 @@ impl<'a> TypeCell<'a> {
     fn borrow(&self) -> Ref<Type<'a>> {
         self.0.get().borrow()
     }
-
     fn borrow_mut(&self) -> RefMut<Type<'a>> {
         self.0.get().borrow_mut()
     }
-
     pub fn is_pointer(&self) -> bool {
         self.borrow().is_pointer()
     }
-
     pub fn is_array(&self) -> bool {
         self.borrow().is_array()
     }
-
     pub fn is_function(&self) -> bool {
         self.borrow().is_function()
     }
-
     pub fn is_func_pointer(&self) -> bool {
         self.borrow().is_func_pointer()
     }
-
     pub fn get_field<'b>(&'b self, name: &Ident) -> Result<TypeCell<'a>, Error> {
         Ok(self.borrow().get_field(name)?.clone())
     }
-
     pub fn pointer_base(&self) -> Option<TypeCell<'a>> {
         self.borrow().pointer_base()
     }
-
-    pub fn array_base(&self) -> Option<TypeCell<'a>> {
-        self.borrow().array_base()
+    pub fn array_base(&self) -> Result<TypeCell<'a>, Error> {
+        self.borrow()
+            .array_base()
+            .ok_or(Error::Semantic("Invalid index access to array".into()))
     }
-
-    pub fn return_type(&self) -> Option<TypeCell<'a>> {
-        self.borrow().return_type()
+    pub fn return_type(&self) -> Result<TypeCell<'a>, Error> {
+        self.borrow()
+            .return_type()
+            .ok_or(Error::Semantic("Function call to non-function type".into()))
     }
-
     pub fn params(&self) -> Option<Vec<TypeCell<'a>>> {
         self.borrow().params()
     }
-
     pub fn members(&self) -> Option<Vec<(TypeCell<'a>, Ident)>> {
         self.borrow().members()
+    }
+    pub fn deref(&self) -> Result<TypeCell<'a>, Error> {
+        todo!()
+    }
+    pub fn addr(&self) -> TypeCell<'a> {
+        todo!()
+    }
+    pub fn int() -> TypeCell<'a> {
+        todo!()
+    }
+    pub fn char() -> TypeCell<'a> {
+        todo!()
+    }
+    pub fn str() -> TypeCell<'a> {
+        todo!()
     }
 }
 
 pub type TypeArena<'a> = Arena<RefCell<Type<'a>>>;
-pub struct TypeTable<'a, 'b> {
+pub struct TypeTable<'a> {
     rmap: HashMap<TypeRef, TypeCell<'a>>,
-    emap: HashMap<&'b Expr, TypeCell<'a>>,
+    // emap: HashMap<&'b Expr, TypeCell<'a>>,
     arena: &'a TypeArena<'a>,
 }
 
-impl<'a, 'b> std::fmt::Debug for TypeTable<'a, 'b> {
+impl<'a> std::fmt::Debug for TypeTable<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         self.rmap.fmt(f)
     }
 }
 
-impl<'a, 'b> TypeTable<'a, 'b> {
+impl<'a> TypeTable<'a> {
     fn empty(arena: &'a TypeArena<'a>) -> Self {
         TypeTable {
             rmap: HashMap::new(),
-            emap: HashMap::new(),
+            // emap: HashMap::new(),
             arena,
         }
     }
@@ -325,9 +333,9 @@ impl<'a, 'b> TypeTable<'a, 'b> {
         Ok(self.get(&k).unwrap())
     }
 
-    pub fn add_expr(&mut self, expr: &'b Expr, t: TypeCell<'a>) {
-        self.emap.insert(expr, t);
-    }
+    // fn add_expr(&mut self, expr: &'b Expr, t: TypeCell<'a>) {
+    //     self.emap.insert(expr, t);
+    // }
 
     pub fn add(&mut self, tref: TypeRef) -> Result<&TypeCell<'a>, Error> {
         if self.rmap.contains_key(&tref) {
