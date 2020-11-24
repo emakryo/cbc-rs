@@ -147,7 +147,7 @@ impl Expr {
             };
         }
 
-        match &mut self.inner {
+        match self.0.as_mut() {
             BaseExpr::Assign(t, e) => {
                 resolve!(t);
                 resolve!(e);
@@ -157,34 +157,34 @@ impl Expr {
                 resolve!(e);
             }
             BaseExpr::BinOp(_, e1, e2) => {
-                resolve!(e1.as_mut());
-                resolve!(e2.as_mut());
+                resolve!(e1);
+                resolve!(e2);
             }
             BaseExpr::Ternary(c, e1, e2) => {
-                resolve!(c.as_mut());
-                resolve!(e1.as_mut());
-                resolve!(e2.as_mut());
+                resolve!(c);
+                resolve!(e1);
+                resolve!(e2);
             }
-            BaseExpr::Cast(_, t) => resolve!(t.as_mut()),
+            BaseExpr::Cast(_, t) => resolve!(t),
             BaseExpr::Call(e, a) => {
-                resolve!(e.as_mut());
+                resolve!(e);
                 resolve!(a);
             }
             BaseExpr::Primary(p) => resolve!(p),
-            BaseExpr::Member(e, _) => resolve!(e.as_mut()),
-            BaseExpr::PMember(e, _) => resolve!(e.as_mut()),
-            BaseExpr::Addr(e) => resolve!(e.as_mut()),
-            BaseExpr::PostInc(e) => resolve!(e.as_mut()),
-            BaseExpr::PostDec(e) => resolve!(e.as_mut()),
-            BaseExpr::UnaryOp(_, e) => resolve!(e.as_mut()),
+            BaseExpr::Member(e, _) => resolve!(e),
+            BaseExpr::PMember(e, _) => resolve!(e),
+            BaseExpr::Addr(e) => resolve!(e),
+            BaseExpr::PostInc(e) => resolve!(e),
+            BaseExpr::PostDec(e) => resolve!(e),
+            BaseExpr::UnaryOp(_, e) => resolve!(e),
             BaseExpr::ArrayRef(e, i) => {
-                resolve!(e.as_mut());
-                resolve!(i.as_mut());
+                resolve!(e);
+                resolve!(i);
             }
-            BaseExpr::Deref(e) => resolve!(e.as_mut()),
-            BaseExpr::PreInc(e) => resolve!(e.as_mut()),
-            BaseExpr::PreDec(e) => resolve!(e.as_mut()),
-            BaseExpr::SizeofE(e) => resolve!(e.as_mut()),
+            BaseExpr::Deref(e) => resolve!(e),
+            BaseExpr::PreInc(e) => resolve!(e),
+            BaseExpr::PreDec(e) => resolve!(e),
+            BaseExpr::SizeofE(e) => resolve!(e),
             BaseExpr::SizeofT(_) => (),
         }
         Ok(())

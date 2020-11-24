@@ -4,7 +4,6 @@ use crate::types::TypeCell;
 
 pub fn check_dereference<'a, 'b, 'c>(
     ast: &Ast<'c, TypedExpr<'a>, TypeCell<'a>>,
-    // type_table: &'a TypeTable<'a, 'b>,
 ) -> Result<(), Error> {
     for defs in &ast.declarations {
         match defs {
@@ -34,7 +33,7 @@ pub fn check_dereference<'a, 'b, 'c>(
 }
 
 impl<'a> Statement<TypedExpr<'a>, TypeCell<'a>> {
-    fn check_deref<'b>(&self /*, type_table: &'a TypeTable<'a, 'b>*/) -> Result<(), Error> {
+    fn check_deref<'b>(&self) -> Result<(), Error> {
         match self {
             Statement::Expr(e) => e.check_deref(),
             Statement::Block(b) => b.check_deref(),
@@ -78,7 +77,7 @@ impl<'a> Statement<TypedExpr<'a>, TypeCell<'a>> {
 }
 
 impl<'a> Block<TypedExpr<'a>, TypeCell<'a>> {
-    fn check_deref<'b>(&self /*type_table: &'a TypeTable<'a, 'b>*/) -> Result<(), Error> {
+    fn check_deref<'b>(&self) -> Result<(), Error> {
         for DefVar { init, .. } in self.ref_vars() {
             if let Some(expr) = init {
                 expr.check_deref()?;
@@ -93,8 +92,8 @@ impl<'a> Block<TypedExpr<'a>, TypeCell<'a>> {
 }
 
 impl<'a> TypedExpr<'a> {
-    fn check_deref<'b>(&self /*type_table: &'a TypeTable<'a, 'b>*/) -> Result<(), Error> {
-        match &self.inner {
+    fn check_deref<'b>(&self) -> Result<(), Error> {
+        match self.inner.as_ref() {
             BaseExpr::Assign(t, e) | BaseExpr::AssignOp(t, _, e) => {
                 if !t.is_assignable()? {
                     return Err(Error::Semantic(format!("Not assignable: {:?}", t)));
@@ -169,72 +168,16 @@ impl<'a> TypedExpr<'a> {
     }
 
     fn is_constant(&self) -> bool {
-        match &self.inner {
+        match self.inner.as_ref() {
             BaseExpr::Primary(p) => p.is_constant(),
             _ => false,
         }
     }
 
-    fn is_assignable<'b>(&self /*type_table: &'a TypeTable<'a, 'b>*/) -> Result<bool, Error> {
+    fn is_assignable<'b>(&self) -> Result<bool, Error> {
         let t = &self.type_;
         Ok(!t.is_array() && !t.is_function())
     }
-
-    // pub fn get_type<'b>(&self, /*type_table: &TypeTable<'a, 'b>*/) -> Result<TypeCell<'a>, Error> {
-    //     match &self.inner {
-    //         BaseExpr::BinOp(_, e, _) => e.get_type(),
-    //         BaseExpr::Cast(t, _) => {
-    //             if let Some(t) = .get(t) {
-    //                 Ok(t.clone())
-    //             } else {
-    //                 Err(Error::Semantic(format!("Invalid type: {:?}", t)))
-    //             }
-    //         }
-    //         BaseExpr::Primary(p) => p.get_type(type_table),
-    //         BaseExpr::ArrayRef(e, _) => {
-    //             let t = e.get_type(type_table)?;
-    //             t.array_base()
-    //                 .ok_or(Error::Semantic(format!("Invalid dereference: {:?}", self)))
-    //         }
-    //         BaseExpr::Deref(e) => {
-    //             let t = e.get_type(type_table)?;
-    //             if let Some(base) = t.pointer_base() {
-    //                 return Ok(base);
-    //             }
-
-    //             Err(Error::Semantic(format!("Invalid dereference: {:?}", self)))
-    //         }
-    //         BaseExpr::Member(e, name) => {
-    //             let t = e.get_type(type_table)?;
-    //             t.get_field(name)
-    //         }
-    //         BaseExpr::PMember(e, name) => {
-    //             let t = e.get_type(type_table)?;
-    //             if let Some(base) = t.pointer_base() {
-    //                 base.get_field(name)
-    //             } else {
-    //                 Err(Error::Semantic(format!(
-    //                     "Arrow access to non-pointer value: {:?}",
-    //                     self
-    //                 )))
-    //             }
-    //         }
-    //         BaseExpr::PostInc(e) | BaseExpr::PostDec(e) => e.as_ref().get_type(type_table),
-    //         BaseExpr::Call(e, _) => {
-    //             let t = e.get_type(type_table)?;
-    //             if let Some(base) = t.pointer_base() {
-    //                 if let Some(base) = base.return_type() {
-    //                     return Ok(base);
-    //                 }
-    //             }
-    //             Err(Error::Semantic(format!(
-    //                 "Function call to non-function variable: {:?}",
-    //                 self
-    //             )))
-    //         }
-    //         e => todo!("{:?}", e),
-    //     }
-    // }
 }
 
 impl<'a> Primary<TypedExpr<'a>> {
@@ -245,27 +188,6 @@ impl<'a> Primary<TypedExpr<'a>> {
             Primary::Expr(e) => e.is_constant(),
         }
     }
-
-    // pub fn get_type<'b>(&self, type_table: &TypeTable<'a, 'b>) -> Result<TypeCell<'a>, Error> {
-    //     match self {
-    //         Primary::Variable(v) => {
-    //             let entity = if let Some(e) = v.get_entity() {
-    //                 e
-    //             } else {
-    //                 return Err(Error::Semantic(format!("Unresolved entity: {:?}", self)));
-    //             };
-    //             let t = entity.get_type();
-    //             Ok(type_table
-    //                 .get(t)
-    //                 .cloned()
-    //                 .expect(&format!("Type must be resolved: {:?}", t)))
-    //         }
-    //         Primary::Integer(_) => Ok(type_table.long().clone()),
-    //         Primary::Character(_) => Ok(type_table.char().clone()),
-    //         Primary::String(_) => Ok(type_table.string().clone()),
-    //         Primary::Expr(e) => e.get_type(type_table),
-    //     }
-    // }
 }
 
 #[cfg(test)]

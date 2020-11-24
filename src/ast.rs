@@ -101,133 +101,93 @@ pub struct Args<E>(pub Vec<E>);
 
 #[derive(Debug, Eq, PartialEq, Clone, Hash)]
 pub enum BaseExpr<E, T> {
-    Assign(Box<E>, Box<E>),
-    AssignOp(Box<E>, AssignOp, Box<E>),
-    Ternary(Box<E>, Box<E>, Box<E>),
-    BinOp(BinOp, Box<E>, Box<E>),
-    Cast(T, Box<E>),
-    PreInc(Box<E>),
-    PreDec(Box<E>),
-    UnaryOp(UnaryOp, Box<E>),
-    Deref(Box<E>),
-    Addr(Box<E>),
+    Assign(E, E),
+    AssignOp(E, AssignOp, E),
+    Ternary(E, E, E),
+    BinOp(BinOp, E, E),
+    Cast(T, E),
+    PreInc(E),
+    PreDec(E),
+    UnaryOp(UnaryOp, E),
+    Deref(E),
+    Addr(E),
     SizeofT(T),
-    SizeofE(Box<E>),
-    PostInc(Box<E>),
-    PostDec(Box<E>),
-    ArrayRef(Box<E>, Box<E>),
-    Member(Box<E>, Ident),
-    PMember(Box<E>, Ident),
-    Call(Box<E>, Args<E>),
+    SizeofE(E),
+    PostInc(E),
+    PostDec(E),
+    ArrayRef(E, E),
+    Member(E, Ident),
+    PMember(E, Ident),
+    Call(E, Args<E>),
     Primary(Primary<E>),
 }
 
 #[derive(Debug, Eq, PartialEq, Clone, Hash)]
-pub struct Expr {
-    pub inner: BaseExpr<Expr, TypeRef>,
-}
+pub struct Expr(pub Box<BaseExpr<Expr, TypeRef>>);
 
 impl Expr {
     pub fn assign(lhs: Expr, rhs: Expr) -> Expr {
-        Expr {
-            inner: BaseExpr::Assign(Box::new(lhs), Box::new(rhs)),
-        }
+        Expr(Box::new(BaseExpr::Assign(lhs, rhs)))
     }
     pub fn assign_op(lhs: Expr, op: AssignOp, rhs: Expr) -> Expr {
-        Expr {
-            inner: BaseExpr::AssignOp(Box::new(lhs), op, Box::new(rhs)),
-        }
+        Expr(Box::new(BaseExpr::AssignOp(lhs, op, rhs)))
     }
     pub fn ternary(cond: Expr, then: Expr, else_: Expr) -> Expr {
-        Expr {
-            inner: BaseExpr::Ternary(Box::new(cond), Box::new(then), Box::new(else_)),
-        }
+        Expr(Box::new(BaseExpr::Ternary(cond, then, else_)))
     }
     pub fn bin_op(op: BinOp, e1: Expr, e2: Expr) -> Expr {
-        Expr {
-            inner: BaseExpr::BinOp(op, Box::new(e1), Box::new(e2)),
-        }
+        Expr(Box::new(BaseExpr::BinOp(op, e1, e2)))
     }
     pub fn cast(type_: TypeRef, e: Expr) -> Expr {
-        Expr {
-            inner: BaseExpr::Cast(type_, Box::new(e)),
-        }
+        Expr(Box::new(BaseExpr::Cast(type_, e)))
     }
     pub fn pre_inc(e: Expr) -> Expr {
-        Expr {
-            inner: BaseExpr::PreInc(Box::new(e)),
-        }
+        Expr(Box::new(BaseExpr::PreInc(e)))
     }
     pub fn pre_dec(e: Expr) -> Expr {
-        Expr {
-            inner: BaseExpr::PreDec(Box::new(e)),
-        }
+        Expr(Box::new(BaseExpr::PreDec(e)))
     }
     pub fn op(unary_op: UnaryOp, e: Expr) -> Expr {
-        Expr {
-            inner: BaseExpr::UnaryOp(unary_op, Box::new(e)),
-        }
+        Expr(Box::new(BaseExpr::UnaryOp(unary_op, e)))
     }
     pub fn deref(e: Expr) -> Expr {
-        Expr {
-            inner: BaseExpr::Deref(Box::new(e)),
-        }
+        Expr(Box::new(BaseExpr::Deref(e)))
     }
     pub fn addr(e: Expr) -> Expr {
-        Expr {
-            inner: BaseExpr::Addr(Box::new(e)),
-        }
+        Expr(Box::new(BaseExpr::Addr(e)))
     }
     pub fn sizeof_type(t: TypeRef) -> Expr {
-        Expr {
-            inner: BaseExpr::SizeofT(t),
-        }
+        Expr(Box::new(BaseExpr::SizeofT(t)))
     }
     pub fn sizeof_expr(e: Expr) -> Expr {
-        Expr {
-            inner: BaseExpr::SizeofE(Box::new(e)),
-        }
+        Expr(Box::new(BaseExpr::SizeofE(e)))
     }
     pub fn post_inc(e: Expr) -> Expr {
-        Expr {
-            inner: BaseExpr::PostInc(Box::new(e)),
-        }
+        Expr(Box::new(BaseExpr::PostInc(e)))
     }
     pub fn post_dec(e: Expr) -> Expr {
-        Expr {
-            inner: BaseExpr::PostDec(Box::new(e)),
-        }
+        Expr(Box::new(BaseExpr::PostDec(e)))
     }
-    pub fn array_ref(array: Expr, index: Box<Expr>) -> Expr {
-        Expr {
-            inner: BaseExpr::ArrayRef(Box::new(array), index),
-        }
+    pub fn array_ref(array: Expr, index: Expr) -> Expr {
+        Expr(Box::new(BaseExpr::ArrayRef(array, index)))
     }
     pub fn member(struct_: Expr, field: Ident) -> Expr {
-        Expr {
-            inner: BaseExpr::Member(Box::new(struct_), field),
-        }
+        Expr(Box::new(BaseExpr::Member(struct_, field)))
     }
     pub fn p_member(struct_: Expr, field: Ident) -> Expr {
-        Expr {
-            inner: BaseExpr::PMember(Box::new(struct_), field),
-        }
+        Expr(Box::new(BaseExpr::PMember(struct_, field)))
     }
     pub fn call(func: Expr, args: Args<Expr>) -> Expr {
-        Expr {
-            inner: BaseExpr::Call(Box::new(func), args),
-        }
+        Expr(Box::new(BaseExpr::Call(func, args)))
     }
     pub fn primary(p: Primary<Expr>) -> Expr {
-        Expr {
-            inner: BaseExpr::Primary(p),
-        }
+        Expr(Box::new(BaseExpr::Primary(p)))
     }
 }
 
 #[derive(Debug)]
 pub struct TypedExpr<'a> {
-    pub inner: BaseExpr<TypedExpr<'a>, TypeCell<'a>>,
+    pub inner: Box<BaseExpr<TypedExpr<'a>, TypeCell<'a>>>,
     pub type_: TypeCell<'a>,
 }
 

@@ -1,4 +1,4 @@
-use crate::ast::{Defun, Ident};
+use crate::ast::Ident;
 use crate::error::Error;
 use std::cell::{Cell, Ref, RefCell, RefMut};
 use std::collections::HashMap;
@@ -443,23 +443,6 @@ impl<'a> TypeTable<'a> {
             self.insert(r.clone(), t)?;
         }
 
-        Ok(())
-    }
-
-    pub fn add_function(&mut self, defun: &Defun) -> Result<(), Error> {
-        self.add(TypeRef::Pointer {
-            base: Box::new(TypeRef::Function {
-                base: Box::new(defun.type_.clone()),
-                params: defun
-                    .params
-                    .params
-                    .iter()
-                    .map(|(t, _)| t)
-                    .cloned()
-                    .collect(),
-                variable_length: defun.params.variable_length,
-            }),
-        })?;
         Ok(())
     }
 

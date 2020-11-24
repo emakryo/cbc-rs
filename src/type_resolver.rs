@@ -247,7 +247,7 @@ impl Statement<Expr, TypeRef> {
 
 fn cast_to<'a>(expr: TypedExpr<'a>, type_: &TypeCell<'a>) -> Result<TypedExpr<'a>, Error> {
     Ok(TypedExpr {
-        inner: BaseExpr::Cast(type_.clone(), Box::new(expr)),
+        inner: Box::new(BaseExpr::Cast(type_.clone(), expr)),
         type_: type_.clone(),
     })
 }
@@ -277,90 +277,78 @@ impl Expr {
         type_table: &mut TypeTable<'a>,
         scope: &S,
     ) -> Result<TypedExpr<'a>, Error> {
-        let (t, e) = match self.inner {
+        let (t, e) = match *self.0 {
             BaseExpr::Assign(e1, e2) => {
                 let e1 = e1.resolve_types(type_table, scope)?;
                 let t = e1.type_.clone();
                 let e2 = e2.resolve_types(type_table, scope)?;
                 let e2 = cast_to(e2, &t)?;
-                (t, BaseExpr::Assign(Box::new(e1), Box::new(e2)))
+                (t, BaseExpr::Assign(e1, e2))
             }
             BaseExpr::AssignOp(e1, op, e2) => {
                 let e1 = e1.resolve_types(type_table, scope)?;
                 let t = e1.type_.clone();
                 let e2 = e2.resolve_types(type_table, scope)?;
                 let e2 = cast_to(e2, &t)?;
-                (t, BaseExpr::AssignOp(Box::new(e1), op, Box::new(e2)))
+                (t, BaseExpr::AssignOp(e1, op, e2))
             }
             BaseExpr::BinOp(op, e1, e2) => {
                 let e1 = e1.resolve_types(type_table, scope)?;
                 let e2 = e2.resolve_types(type_table, scope)?;
                 let (e1, e2) = cast(e1, e2, type_table)?;
-                (
-                    e1.type_.clone(),
-                    BaseExpr::BinOp(op, Box::new(e1), Box::new(e2)),
-                )
+                (e1.type_.clone(), BaseExpr::BinOp(op, e1, e2))
             }
             BaseExpr::Ternary(cond, e1, e2) => {
                 let cond = cond.resolve_types(type_table, scope)?;
                 let e1 = e1.resolve_types(type_table, scope)?;
                 let e2 = e2.resolve_types(type_table, scope)?;
                 let (e1, e2) = cast(e1, e2, type_table)?;
-                (
-                    e1.type_.clone(),
-                    BaseExpr::Ternary(Box::new(cond), Box::new(e1), Box::new(e2)),
-                )
+                (e1.type_.clone(), BaseExpr::Ternary(cond, e1, e2))
             }
             BaseExpr::Cast(t, e) => {
                 let e = e.resolve_types(type_table, scope)?;
                 let t = type_table.get(&t).unwrap().clone();
-                (t.clone(), BaseExpr::Cast(t, Box::new(e)))
+                (t.clone(), BaseExpr::Cast(t, e))
             }
             BaseExpr::PreInc(e) => {
                 let e = e.resolve_types(type_table, scope)?;
-                (e.type_.clone(), BaseExpr::PreInc(Box::new(e)))
+                (e.type_.clone(), BaseExpr::PreInc(e))
             }
             BaseExpr::PreDec(e) => {
                 let e = e.resolve_types(type_table, scope)?;
-                (e.type_.clone(), BaseExpr::PreDec(Box::new(e)))
+                (e.type_.clone(), BaseExpr::PreDec(e))
             }
             BaseExpr::UnaryOp(op, e) => {
                 let e = e.resolve_types(type_table, scope)?;
-                (e.type_.clone(), BaseExpr::UnaryOp(op, Box::new(e)))
+                (e.type_.clone(), BaseExpr::UnaryOp(op, e))
             }
             BaseExpr::Deref(e) => {
                 let e = e.resolve_types(type_table, scope)?;
                 let t = &e.type_;
-                (t.deref()?, BaseExpr::Deref(Box::new(e)))
+                (t.deref()?, BaseExpr::Deref(e))
             }
             BaseExpr::PostInc(e) => {
                 let e = e.resolve_types(type_table, scope)?;
-                (e.type_.clone(), BaseExpr::PostInc(Box::new(e)))
+                (e.type_.clone(), BaseExpr::PostInc(e))
             }
             BaseExpr::PostDec(e) => {
                 let e = e.resolve_types(type_table, scope)?;
-                (e.type_.clone(), BaseExpr::PostDec(Box::new(e)))
+                (e.type_.clone(), BaseExpr::PostDec(e))
             }
             BaseExpr::Member(e, name) => {
                 let e = e.resolve_types(type_table, scope)?;
-                (
-                    e.type_.get_field(&name)?,
-                    BaseExpr::Member(Box::new(e), name),
-                )
+                (e.type_.get_field(&name)?, BaseExpr::Member(e, name))
             }
             BaseExpr::PMember(e, name) => {
                 let e = e.resolve_types(type_table, scope)?;
                 (
                     e.type_.deref()?.get_field(&name)?,
-                    BaseExpr::PMember(Box::new(e), name),
+                    BaseExpr::PMember(e, name),
                 )
             }
             BaseExpr::Addr(e) => {
                 let e = e.resolve_types(type_table, scope)?;
-                (
-                    type_table.addr(&e.type_).clone(),
-                    BaseExpr::Addr(Box::new(e)),
-                )
+                (type_table.addr(&e.type_).clone(), BaseExpr::Addr(e))
             }
             BaseExpr::SizeofT(t) => {
                 let t = type_table.add(t)?.clone();
@@ -368,15 +356,12 @@ impl Expr {
             }
             BaseExpr::SizeofE(e) => {
                 let e = e.resolve_types(type_table, scope)?;
-                (type_table.long().clone(), BaseExpr::SizeofE(Box::new(e)))
+                (type_table.long().clone(), BaseExpr::SizeofE(e))
             }
             BaseExpr::ArrayRef(a, idx) => {
                 let a = a.resolve_types(type_table, scope)?;
                 let idx = idx.resolve_types(type_table, scope)?;
-                (
-                    a.type_.array_base()?,
-                    BaseExpr::ArrayRef(Box::new(a), Box::new(idx)),
-                )
+                (a.type_.array_base()?, BaseExpr::ArrayRef(a, idx))
             }
             BaseExpr::Call(f, args) => {
                 let f = f.resolve_types(type_table, scope)?;
@@ -386,10 +371,7 @@ impl Expr {
                     .map(|a| a.resolve_types(type_table, scope))
                     .collect::<Result<_, Error>>()?;
 
-                (
-                    f.type_.return_type()?,
-                    BaseExpr::Call(Box::new(f), Args(args)),
-                )
+                (f.type_.return_type()?, BaseExpr::Call(f, Args(args)))
             }
             BaseExpr::Primary(p) => {
                 let (p, t) = p.resolve_types(type_table, scope)?;
@@ -397,7 +379,10 @@ impl Expr {
             }
         };
 
-        Ok(TypedExpr { inner: e, type_: t })
+        Ok(TypedExpr {
+            inner: Box::new(e),
+            type_: t,
+        })
     }
 }
 

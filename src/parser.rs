@@ -317,7 +317,7 @@ fn unary<'a>(i: &'a str, types: &'_ TypeMap) -> IResult<&'a str, Expr> {
                 pfs.into_iter().fold(Expr::primary(pr), |u, pf| match pf {
                     Postfix::Inc => Expr::post_inc(u),
                     Postfix::Dec => Expr::post_dec(u),
-                    Postfix::ArrayRef(e) => Expr::array_ref(u, e),
+                    Postfix::ArrayRef(e) => Expr::array_ref(u, *e),
                     Postfix::Member(n) => Expr::member(u, n),
                     Postfix::PMember(n) => Expr::p_member(u, n),
                     Postfix::Call(a) => Expr::call(u, a),
