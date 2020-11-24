@@ -1,4 +1,4 @@
-use crate::ast::{Ident, Defun};
+use crate::ast::{Defun, Ident};
 use crate::error::Error;
 use std::cell::{Cell, Ref, RefCell, RefMut};
 use std::collections::HashMap;
@@ -134,7 +134,7 @@ impl<'a> Type<'a> {
     fn deref(&self) -> Result<&TypeCell<'a>, Error> {
         match self {
             Type::Pointer { base } => Ok(base),
-            _ => Err(Error::Semantic("Dereference of non-pointer type".into()))
+            _ => Err(Error::Semantic("Dereference of non-pointer type".into())),
         }
     }
 
@@ -450,9 +450,15 @@ impl<'a> TypeTable<'a> {
         self.add(TypeRef::Pointer {
             base: Box::new(TypeRef::Function {
                 base: Box::new(defun.type_.clone()),
-                params: defun.params.params.iter().map(|(t, _)| t).cloned().collect(),
+                params: defun
+                    .params
+                    .params
+                    .iter()
+                    .map(|(t, _)| t)
+                    .cloned()
+                    .collect(),
                 variable_length: defun.params.variable_length,
-            })
+            }),
         })?;
         Ok(())
     }

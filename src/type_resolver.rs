@@ -188,16 +188,14 @@ impl Statement<Expr, TypeRef> {
         scope: &S,
     ) -> Result<Statement<TypedExpr<'a>, TypeCell<'a>>, Error> {
         let stmt = match self {
-            Statement::Expr(e) => {
-                Statement::Expr(e.resolve_types(type_table, scope)?)
-            }
-            Statement::Block(b) => {
-                Statement::Block(b.resolve_types(type_table)?)
-            }
+            Statement::Expr(e) => Statement::Expr(e.resolve_types(type_table, scope)?),
+            Statement::Block(b) => Statement::Block(b.resolve_types(type_table)?),
             Statement::If(cond, then, else_) => {
                 let cond = cond.resolve_types(type_table, scope)?;
                 let then = then.resolve_types(type_table, scope)?;
-                let else_ = else_.map(|s| s.resolve_types(type_table, scope)).map_or(Ok(None), |s| s.map(Some))?;
+                let else_ = else_
+                    .map(|s| s.resolve_types(type_table, scope))
+                    .map_or(Ok(None), |s| s.map(Some))?;
                 Statement::If(cond, Box::new(then), Box::new(else_))
             }
             Statement::While(cond, body) => {
@@ -219,18 +217,23 @@ impl Statement<Expr, TypeRef> {
             }
             Statement::Switch(e, branches) => {
                 let e = e.resolve_types(type_table, scope)?;
-                let branches = branches.into_iter().map(|(vals, body)| {
-                    Ok((vals.into_iter().map(|v| {
-                        Ok(v.resolve_types(type_table, scope)?.0)
-                    }).collect::<Result<Vec<_>, Error>>()?,
-                    body.resolve_types(type_table)?))
-                }).collect::<Result<Vec<_>, Error>>()?;
+                let branches = branches
+                    .into_iter()
+                    .map(|(vals, body)| {
+                        Ok((
+                            vals.into_iter()
+                                .map(|v| Ok(v.resolve_types(type_table, scope)?.0))
+                                .collect::<Result<Vec<_>, Error>>()?,
+                            body.resolve_types(type_table)?,
+                        ))
+                    })
+                    .collect::<Result<Vec<_>, Error>>()?;
 
                 Statement::Switch(e, branches)
             }
-            Statement::Return(e) => {
-                Statement::Return(e.map_or(Ok(None), |e| e.resolve_types(type_table, scope).map(Some))?)
-            }
+            Statement::Return(e) => Statement::Return(
+                e.map_or(Ok(None), |e| e.resolve_types(type_table, scope).map(Some))?,
+            ),
             Statement::Break => Statement::Break,
             Statement::Continue => Statement::Continue,
             Statement::Label(l) => Statement::Label(l),
@@ -249,7 +252,11 @@ fn cast_to<'a>(expr: TypedExpr<'a>, type_: &TypeCell<'a>) -> Result<TypedExpr<'a
     })
 }
 
-fn cast<'a>(e1: TypedExpr<'a>, e2: TypedExpr<'a>, type_table: &TypeTable<'a>) -> Result<(TypedExpr<'a>, TypedExpr<'a>), Error> {
+fn cast<'a>(
+    e1: TypedExpr<'a>,
+    e2: TypedExpr<'a>,
+    type_table: &TypeTable<'a>,
+) -> Result<(TypedExpr<'a>, TypedExpr<'a>), Error> {
     if e1.type_ == e2.type_ {
         Ok((e1, e2))
     } else {
@@ -350,7 +357,10 @@ impl Expr {
             }
             BaseExpr::Addr(e) => {
                 let e = e.resolve_types(type_table, scope)?;
-                (type_table.addr(&e.type_).clone(), BaseExpr::Addr(Box::new(e)))
+                (
+                    type_table.addr(&e.type_).clone(),
+                    BaseExpr::Addr(Box::new(e)),
+                )
             }
             BaseExpr::SizeofT(t) => {
                 let t = type_table.add(t)?.clone();
