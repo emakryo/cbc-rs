@@ -91,7 +91,9 @@ impl Statement<Expr, TypeRef> {
         match self {
             Statement::Expr(e) => resolve!(e),
             Statement::Block(b) => {
-                b.resolve_variables(new_scope(scope))?;
+                let new = new_scope(scope);
+                b.set_scope(new.clone());
+                b.resolve_variables(new)?;
             }
             Statement::If(e, t, f) => {
                 resolve!(e);
@@ -122,7 +124,9 @@ impl Statement<Expr, TypeRef> {
             Statement::Switch(e, bs) => {
                 resolve!(e);
                 for (_, b) in &mut bs.into_iter() {
-                    resolve!(b);
+                    let new = new_scope(scope.clone());
+                    b.set_scope(new.clone());
+                    b.resolve_variables(new)?;
                 }
             }
             Statement::None => (),

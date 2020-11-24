@@ -1,4 +1,4 @@
-use crate::ast::Ident;
+use crate::ast::{Ident, Defun};
 use crate::error::Error;
 use std::cell::{Cell, Ref, RefCell, RefMut};
 use std::collections::HashMap;
@@ -63,6 +63,9 @@ pub enum Type<'a> {
 }
 
 impl<'a> Type<'a> {
+    fn is_numeric(&self) -> bool {
+        matches!(self, Type::Integer{..})
+    }
     fn is_void(&self) -> bool {
         *self == Type::Void
     }
@@ -72,17 +75,11 @@ impl<'a> Type<'a> {
     }
 
     fn is_array(&self) -> bool {
-        match self {
-            Type::Array { .. } => true,
-            _ => false,
-        }
+        matches!(self, Type::Array { .. })
     }
 
     fn is_function(&self) -> bool {
-        match self {
-            Type::Function { .. } => true,
-            _ => false,
-        }
+        matches!(self, Type::Function { .. })
     }
 
     fn is_func_pointer(&self) -> bool {
@@ -90,10 +87,7 @@ impl<'a> Type<'a> {
     }
 
     fn is_undefined(&self) -> bool {
-        match self {
-            Type::Undefined => true,
-            _ => false,
-        }
+        matches!(self, Type::Undefined)
     }
 
     fn pointer_base(&self) -> Option<TypeCell<'a>> {
@@ -134,6 +128,13 @@ impl<'a> Type<'a> {
         match self {
             Type::Struct { members, .. } | Type::Union { members, .. } => Some(members.clone()),
             _ => None,
+        }
+    }
+
+    fn deref(&self) -> Result<&TypeCell<'a>, Error> {
+        match self {
+            Type::Pointer { base } => Ok(base),
+            _ => Err(Error::Semantic("Dereference of non-pointer type".into()))
         }
     }
 
@@ -234,6 +235,9 @@ impl<'a> TypeCell<'a> {
     fn borrow_mut(&self) -> RefMut<Type<'a>> {
         self.0.get().borrow_mut()
     }
+    pub fn is_numeric(&self) -> bool {
+        self.borrow().is_numeric()
+    }
     pub fn is_pointer(&self) -> bool {
         self.borrow().is_pointer()
     }
@@ -246,7 +250,7 @@ impl<'a> TypeCell<'a> {
     pub fn is_func_pointer(&self) -> bool {
         self.borrow().is_func_pointer()
     }
-    pub fn get_field<'b>(&'b self, name: &Ident) -> Result<TypeCell<'a>, Error> {
+    pub fn get_field(&self, name: &Ident) -> Result<TypeCell<'a>, Error> {
         Ok(self.borrow().get_field(name)?.clone())
     }
     pub fn pointer_base(&self) -> Option<TypeCell<'a>> {
@@ -269,19 +273,7 @@ impl<'a> TypeCell<'a> {
         self.borrow().members()
     }
     pub fn deref(&self) -> Result<TypeCell<'a>, Error> {
-        todo!()
-    }
-    pub fn addr(&self) -> TypeCell<'a> {
-        todo!()
-    }
-    pub fn int() -> TypeCell<'a> {
-        todo!()
-    }
-    pub fn char() -> TypeCell<'a> {
-        todo!()
-    }
-    pub fn str() -> TypeCell<'a> {
-        todo!()
+        self.borrow().deref().map(|t| t.clone())
     }
 }
 
@@ -302,7 +294,6 @@ impl<'a> TypeTable<'a> {
     fn empty(arena: &'a TypeArena<'a>) -> Self {
         TypeTable {
             rmap: HashMap::new(),
-            // emap: HashMap::new(),
             arena,
         }
     }
@@ -332,10 +323,6 @@ impl<'a> TypeTable<'a> {
         self.rmap.insert(k.clone(), TypeCell(Cell::new(v)));
         Ok(self.get(&k).unwrap())
     }
-
-    // fn add_expr(&mut self, expr: &'b Expr, t: TypeCell<'a>) {
-    //     self.emap.insert(expr, t);
-    // }
 
     pub fn add(&mut self, tref: TypeRef) -> Result<&TypeCell<'a>, Error> {
         if self.rmap.contains_key(&tref) {
@@ -456,9 +443,17 @@ impl<'a> TypeTable<'a> {
             self.insert(r.clone(), t)?;
         }
 
-        // let t = self.get(&r).unwrap();
-        // dbg!((&t, t.borrow()));
+        Ok(())
+    }
 
+    pub fn add_function(&mut self, defun: &Defun) -> Result<(), Error> {
+        self.add(TypeRef::Pointer {
+            base: Box::new(TypeRef::Function {
+                base: Box::new(defun.type_.clone()),
+                params: defun.params.params.iter().map(|(t, _)| t).cloned().collect(),
+                variable_length: defun.params.variable_length,
+            })
+        })?;
         Ok(())
     }
 
@@ -475,6 +470,11 @@ impl<'a> TypeTable<'a> {
             base: Box::new(TypeRef::Char),
         })
         .unwrap()
+    }
+
+    pub fn addr(&self, base: &TypeCell<'a>) -> TypeCell<'a> {
+        let t = Type::Pointer { base: base.clone() };
+        TypeCell(Cell::new(self.arena.alloc(RefCell::new(t))))
     }
 
     pub fn values<'c>(&'c self) -> Box<dyn Iterator<Item = TypeCell<'a>> + 'c> {

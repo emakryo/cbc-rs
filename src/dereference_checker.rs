@@ -1,6 +1,6 @@
 use crate::ast::*;
 use crate::error::Error;
-use crate::types::{TypeCell, TypeTable};
+use crate::types::TypeCell;
 
 pub fn check_dereference<'a, 'b, 'c>(
     ast: &Ast<'c, TypedExpr<'a>, TypeCell<'a>>,

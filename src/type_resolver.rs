@@ -11,6 +11,10 @@ pub fn resolve_types<'a, 'b>(
 ) -> Result<Ast<'b, TypedExpr<'a>, TypeCell<'a>>, Error> {
     let mut type_table = TypeTable::new(arena);
 
+    for entity in global_scope.root.borrow().entities.values() {
+        type_table.add(entity.get_type().clone())?;
+    }
+
     let mut declarations = vec![];
     for dec in ast.declarations {
         let dec = match dec {
@@ -28,7 +32,7 @@ pub fn resolve_types<'a, 'b>(
             }
             Declaration::DefVar(def) => Some(Declaration::DefVar(DefVar {
                 storage: def.storage,
-                type_: type_table.get(&def.type_).unwrap().clone(),
+                type_: type_table.add(def.type_)?.clone(),
                 name: def.name,
                 init: def.init.map_or(Ok(None), |e| {
                     e.resolve_types(&mut type_table, global_scope).map(Some)
@@ -36,13 +40,13 @@ pub fn resolve_types<'a, 'b>(
             })),
             Declaration::VarDecl(def) => Some(Declaration::VarDecl(DefVar {
                 storage: def.storage,
-                type_: type_table.get(&def.type_).unwrap().clone(),
+                type_: type_table.add(def.type_)?.clone(),
                 name: def.name,
                 init: None,
             })),
             Declaration::DefConst(def) => Some(Declaration::DefConst(DefVar {
                 storage: def.storage,
-                type_: type_table.get(&def.type_).unwrap().clone(),
+                type_: type_table.add(def.type_)?.clone(),
                 name: def.name,
                 init: def.init.map_or(Ok(None), |e| {
                     e.resolve_types(&mut type_table, global_scope).map(Some)
@@ -151,7 +155,7 @@ impl Block<Expr, TypeRef> {
                 // type_table.add(def.type_.clone())?;
                 Ok(DefVar {
                     storage: var.storage,
-                    type_: type_table.get(&var.type_).unwrap().clone(),
+                    type_: type_table.add(var.type_)?.clone(),
                     name: var.name,
                     init: var
                         .init
@@ -183,61 +187,81 @@ impl Statement<Expr, TypeRef> {
         type_table: &mut TypeTable<'a>,
         scope: &S,
     ) -> Result<Statement<TypedExpr<'a>, TypeCell<'a>>, Error> {
-        match self {
+        let stmt = match self {
             Statement::Expr(e) => {
-                e.resolve_types(type_table, scope)?;
+                Statement::Expr(e.resolve_types(type_table, scope)?)
             }
             Statement::Block(b) => {
-                b.resolve_types(type_table)?;
+                Statement::Block(b.resolve_types(type_table)?)
             }
-            Statement::If(e, st, sf) => {
-                e.resolve_types(type_table, scope)?;
-                st.resolve_types(type_table, scope)?;
-                if let Some(s) = sf.as_ref().clone() {
-                    s.resolve_types(type_table, scope)?;
-                }
+            Statement::If(cond, then, else_) => {
+                let cond = cond.resolve_types(type_table, scope)?;
+                let then = then.resolve_types(type_table, scope)?;
+                let else_ = else_.map(|s| s.resolve_types(type_table, scope)).map_or(Ok(None), |s| s.map(Some))?;
+                Statement::If(cond, Box::new(then), Box::new(else_))
             }
-            Statement::While(e, s) | Statement::DoWhile(e, s) => {
-                e.resolve_types(type_table, scope)?;
-                s.resolve_types(type_table, scope)?;
+            Statement::While(cond, body) => {
+                let cond = cond.resolve_types(type_table, scope)?;
+                let body = body.resolve_types(type_table, scope)?;
+                Statement::While(cond, Box::new(body))
+            }
+            Statement::DoWhile(cond, body) => {
+                let cond = cond.resolve_types(type_table, scope)?;
+                let body = body.resolve_types(type_table, scope)?;
+                Statement::DoWhile(cond, Box::new(body))
             }
             Statement::For(init, cond, step, body) => {
-                init.resolve_types(type_table, scope)?;
-                cond.resolve_types(type_table, scope)?;
-                step.resolve_types(type_table, scope)?;
-                body.resolve_types(type_table, scope)?;
+                let init = init.resolve_types(type_table, scope)?;
+                let cond = cond.resolve_types(type_table, scope)?;
+                let step = step.resolve_types(type_table, scope)?;
+                let body = body.resolve_types(type_table, scope)?;
+                Statement::For(init, cond, step, Box::new(body))
             }
-            Statement::Switch(e, branch) => {
-                e.resolve_types(type_table, scope)?;
-                for (vals, body) in branch {
-                    for v in vals {
-                        v.resolve_types(type_table, scope)?;
-                    }
+            Statement::Switch(e, branches) => {
+                let e = e.resolve_types(type_table, scope)?;
+                let branches = branches.into_iter().map(|(vals, body)| {
+                    Ok((vals.into_iter().map(|v| {
+                        Ok(v.resolve_types(type_table, scope)?.0)
+                    }).collect::<Result<Vec<_>, Error>>()?,
+                    body.resolve_types(type_table)?))
+                }).collect::<Result<Vec<_>, Error>>()?;
 
-                    body.resolve_types(type_table)?;
-                }
+                Statement::Switch(e, branches)
             }
             Statement::Return(e) => {
-                if let Some(e) = e {
-                    e.resolve_types(type_table, scope)?;
-                }
+                Statement::Return(e.map_or(Ok(None), |e| e.resolve_types(type_table, scope).map(Some))?)
             }
-            _ => (),
+            Statement::Break => Statement::Break,
+            Statement::Continue => Statement::Continue,
+            Statement::Label(l) => Statement::Label(l),
+            Statement::Goto(l) => Statement::Goto(l),
+            Statement::None => Statement::None,
         };
-        todo!()
+
+        Ok(stmt)
     }
 }
 
-fn cast_to<'a, 'b>(expr: TypedExpr<'a>, type_: &TypeCell<'b>) -> Result<TypedExpr<'a>, Error> {
-    todo!()
+fn cast_to<'a>(expr: TypedExpr<'a>, type_: &TypeCell<'a>) -> Result<TypedExpr<'a>, Error> {
+    Ok(TypedExpr {
+        inner: BaseExpr::Cast(type_.clone(), Box::new(expr)),
+        type_: type_.clone(),
+    })
 }
 
-fn cast<'a>(
-    e1: TypedExpr<'a>,
-    e2: TypedExpr<'a>,
-    type_table: &TypeTable<'a>,
-) -> Result<(TypedExpr<'a>, TypedExpr<'a>), Error> {
-    todo!()
+fn cast<'a>(e1: TypedExpr<'a>, e2: TypedExpr<'a>, type_table: &TypeTable<'a>) -> Result<(TypedExpr<'a>, TypedExpr<'a>), Error> {
+    if e1.type_ == e2.type_ {
+        Ok((e1, e2))
+    } else {
+        let t1 = &e1.type_;
+        let t2 = &e2.type_;
+        if t1.is_numeric() || t2.is_numeric() {
+            return Err(Error::Semantic("Failed to implicit conversion".into()));
+        }
+
+        let t = type_table.long();
+        Ok((cast_to(e1, t)?, cast_to(e2, t)?))
+    }
 }
 
 impl Expr {
@@ -326,15 +350,15 @@ impl Expr {
             }
             BaseExpr::Addr(e) => {
                 let e = e.resolve_types(type_table, scope)?;
-                (e.type_.addr(), BaseExpr::Addr(Box::new(e)))
+                (type_table.addr(&e.type_).clone(), BaseExpr::Addr(Box::new(e)))
             }
             BaseExpr::SizeofT(t) => {
-                let t = type_table.get(&t).unwrap().clone();
-                (TypeCell::int(), BaseExpr::SizeofT(t))
+                let t = type_table.add(t)?.clone();
+                (type_table.long().clone(), BaseExpr::SizeofT(t))
             }
             BaseExpr::SizeofE(e) => {
                 let e = e.resolve_types(type_table, scope)?;
-                (TypeCell::int(), BaseExpr::SizeofE(Box::new(e)))
+                (type_table.long().clone(), BaseExpr::SizeofE(Box::new(e)))
             }
             BaseExpr::ArrayRef(a, idx) => {
                 let a = a.resolve_types(type_table, scope)?;
@@ -379,9 +403,9 @@ impl Primary<Expr> {
                 let t = e.type_.clone();
                 (Primary::Expr(Box::new(e)), t)
             }
-            Primary::Character(c) => (Primary::Character(c), TypeCell::char()),
-            Primary::Integer(i) => (Primary::Integer(i), TypeCell::int()),
-            Primary::String(s) => (Primary::String(s), TypeCell::str()),
+            Primary::Character(c) => (Primary::Character(c), type_table.char().clone()),
+            Primary::Integer(i) => (Primary::Integer(i), type_table.long().clone()),
+            Primary::String(s) => (Primary::String(s), type_table.string().clone()),
             Primary::Variable(v) => {
                 let t = scope.get_entity(&v.name()).unwrap();
                 (

@@ -77,7 +77,7 @@ impl GlobalScope {
 }
 
 pub struct LocalScope {
-    entities: HashMap<String, Rc<Entity>>,
+    pub entities: HashMap<String, Rc<Entity>>,
     children: Vec<Rc<RefCell<LocalScope>>>,
     parent: Option<Rc<RefCell<LocalScope>>>,
 }
