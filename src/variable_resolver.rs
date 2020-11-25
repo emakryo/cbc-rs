@@ -5,7 +5,7 @@ use crate::types::TypeRef;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-pub fn resolve_variables(ast: &mut Ast<Expr, TypeRef>) -> Result<GlobalScope, Error> {
+pub fn resolve_variables(ast: &mut Ast<Expr, TypeRef>) -> Result<GlobalScope<TypeRef>, Error> {
     let mut global = GlobalScope::new();
 
     for def in &mut ast.declarations {
@@ -54,7 +54,7 @@ pub fn resolve_variables(ast: &mut Ast<Expr, TypeRef>) -> Result<GlobalScope, Er
 }
 
 impl Block<Expr, TypeRef> {
-    fn resolve_variables(&mut self, scope: Rc<RefCell<LocalScope>>) -> Result<(), Error> {
+    fn resolve_variables(&mut self, scope: Rc<RefCell<LocalScope<TypeRef>>>) -> Result<(), Error> {
         for var in self.mut_vars() {
             scope
                 .borrow_mut()
@@ -74,7 +74,7 @@ impl Block<Expr, TypeRef> {
 }
 
 impl Statement<Expr, TypeRef> {
-    fn resolve_variables(&mut self, scope: Rc<RefCell<LocalScope>>) -> Result<(), Error> {
+    fn resolve_variables(&mut self, scope: Rc<RefCell<LocalScope<TypeRef>>>) -> Result<(), Error> {
         macro_rules! resolve {
             ($e:expr) => {
                 $e.resolve_variables(Rc::clone(&scope))?;
@@ -132,7 +132,7 @@ impl Statement<Expr, TypeRef> {
 }
 
 impl Expr {
-    fn resolve_variables(&mut self, scope: Rc<RefCell<LocalScope>>) -> Result<(), Error> {
+    fn resolve_variables(&mut self, scope: Rc<RefCell<LocalScope<TypeRef>>>) -> Result<(), Error> {
         macro_rules! resolve {
             ($e:expr) => {
                 $e.resolve_variables(Rc::clone(&scope))?;
@@ -184,7 +184,7 @@ impl Expr {
 }
 
 impl Primary<Expr> {
-    fn resolve_variables(&mut self, scope: Rc<RefCell<LocalScope>>) -> Result<(), Error> {
+    fn resolve_variables(&mut self, scope: Rc<RefCell<LocalScope<TypeRef>>>) -> Result<(), Error> {
         match self {
             Primary::Variable(v) => {
                 let name = v.name();
@@ -203,7 +203,7 @@ impl Primary<Expr> {
 }
 
 impl Args<Expr> {
-    fn resolve_variables(&mut self, scope: Rc<RefCell<LocalScope>>) -> Result<(), Error> {
+    fn resolve_variables(&mut self, scope: Rc<RefCell<LocalScope<TypeRef>>>) -> Result<(), Error> {
         (&mut self.0)
             .into_iter()
             .map(|e| e.resolve_variables(Rc::clone(&scope)))

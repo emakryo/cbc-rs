@@ -1,11 +1,11 @@
 use crate::ast;
-use crate::entity::GlobalScope;
+use crate::entity::{GlobalScope, Entity};
 use crate::error::Error;
 use crate::ir;
 use crate::types::TypeCell;
 
 impl<'a, 'b> ast::Ast<'a, ast::TypedExpr<'b>, TypeCell<'b>> {
-    pub fn transform(self, scope: &GlobalScope) -> Result<ir::IR<'b>, Error> {
+    pub fn transform(self, scope: &GlobalScope<TypeCell<'a>>) -> Result<ir::IR<'b>, Error> {
         let mut defvars = vec![];
         let mut defuns = vec![];
         let mut funcdecls = vec![];
@@ -54,18 +54,28 @@ fn assign<'a>(
     todo!()
 }
 
-// fn new_var(type_: TypeRef) -> ir::Expr {
-//     todo!()
-// }
+fn tmp_var<'a>(type_: &TypeCell<'a>) -> ir::Expr<'a> {
+    ir::Expr {
+        base: ir::BaseExpr::Var(Entity::Variable{
+            name: "tmp".into(),
+            type_: type_.clone(),
+        }),
+        type_: type_.clone(),
+    }
+}
 
 impl<'a> ast::TypedExpr<'a> {
     fn transform(self, stmts: &mut Vec<ir::Statement<'a>>) -> Result<ir::Expr<'a>, Error> {
         use ast::BaseExpr::*;
         let e = match *self.inner {
             Assign(lhs, rhs) => {
-                let lhs = lhs.transform(stmts)?;
                 let rhs = rhs.transform(stmts)?;
-                assign(stmts, lhs, rhs)
+                let tmp = tmp_var(&rhs.type_);
+
+                assign(stmts, tmp.clone(), rhs);
+                let lhs = lhs.transform(stmts)?;
+                assign(stmts, lhs, tmp.clone());
+                tmp
             }
             _ => todo!(),
         };
@@ -123,11 +133,11 @@ mod test {
             return;
         }
 
-        let ir = ast.transform(&scope);
-        if ir.is_err() {
-            dbg!(ir).ok();
-            return;
-        }
+        // let ir = ast.transform(&scope);
+        // if ir.is_err() {
+        //     dbg!(ir).ok();
+        //     return;
+        // }
     }
 
     //#[test]

@@ -24,7 +24,7 @@ pub enum Statement<'a> {
     Return(Expr<'a>),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum BaseExpr<'a> {
     UniOp {
         op: UniOp,
@@ -41,18 +41,18 @@ pub enum BaseExpr<'a> {
     },
     Addr(Box<Expr<'a>>),
     Mem(Box<Expr<'a>>),
-    Var(Entity),
+    Var(Entity<TypeCell<'a>>),
     Int(Constant),
     Str(String),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Expr<'a> {
-    base: BaseExpr<'a>,
-    type_: TypeCell<'a>,
+    pub base: BaseExpr<'a>,
+    pub type_: TypeCell<'a>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum UniOp {
     Neg,
     BitNot,
@@ -61,7 +61,7 @@ pub enum UniOp {
     UCast,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum BinOp {
     Add,
     Sub,
@@ -91,7 +91,7 @@ pub enum BinOp {
 #[derive(Debug)]
 pub struct Label(String);
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Constant {}
 
 #[derive(Debug)]

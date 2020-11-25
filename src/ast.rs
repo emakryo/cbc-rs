@@ -75,7 +75,7 @@ pub enum Primary<E> {
 #[derive(Debug, Eq, PartialEq, Clone, Hash)]
 pub struct Variable {
     name: Ident,
-    entity: Option<Rc<Entity>>,
+    entity: Option<Rc<Entity<TypeRef>>>,
 }
 
 impl Variable {
@@ -85,13 +85,13 @@ impl Variable {
     pub fn name(&self) -> String {
         self.name.0.clone()
     }
-    pub fn set_entity(&mut self, entity: Rc<Entity>) {
+    pub fn set_entity(&mut self, entity: Rc<Entity<TypeRef>>) {
         if self.entity.is_some() {
             panic!("variable already set entity");
         }
         self.entity = Some(entity)
     }
-    pub fn get_entity(&self) -> Option<Rc<Entity>> {
+    pub fn get_entity(&self) -> Option<Rc<Entity<TypeRef>>> {
         self.entity.as_ref().map(Rc::clone)
     }
 }
@@ -239,7 +239,7 @@ pub struct DefVar<E, T> {
 pub struct Block<E, T> {
     pub vars: Vec<DefVar<E, T>>,
     pub stmts: Vec<Statement<E, T>>,
-    pub scope: Option<Rc<RefCell<LocalScope>>>,
+    pub scope: Option<Rc<RefCell<LocalScope<TypeRef>>>>,
 }
 
 impl<E: PartialEq, T: PartialEq> PartialEq for Block<E, T> {
@@ -275,14 +275,14 @@ impl<E, T> Block<E, T> {
         &mut self.stmts
     }
 
-    pub fn set_scope(&mut self, scope: Rc<RefCell<LocalScope>>) {
+    pub fn set_scope(&mut self, scope: Rc<RefCell<LocalScope<TypeRef>>>) {
         if self.scope.is_some() {
             panic!("Already scope has set");
         }
         self.scope = Some(scope);
     }
 
-    pub fn get_scope(&self) -> Option<Rc<RefCell<LocalScope>>> {
+    pub fn get_scope(&self) -> Option<Rc<RefCell<LocalScope<TypeRef>>>> {
         self.scope.as_ref().map(Rc::clone)
     }
 }

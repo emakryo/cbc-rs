@@ -7,7 +7,7 @@ use std::collections::HashSet;
 pub fn resolve_types<'a, 'b>(
     ast: Ast<'b, Expr, TypeRef>,
     arena: &'a TypeArena<'a>,
-    global_scope: &GlobalScope,
+    global_scope: &GlobalScope<TypeRef>,
 ) -> Result<Ast<'b, TypedExpr<'a>, TypeCell<'a>>, Error> {
     let mut type_table = TypeTable::new(arena);
 
@@ -202,7 +202,7 @@ impl Block<Expr, TypeRef> {
 }
 
 impl Statement<Expr, TypeRef> {
-    fn resolve_types<'a, S: Scope>(
+    fn resolve_types<'a, S: Scope<Type=TypeRef>>(
         self,
         type_table: &mut TypeTable<'a>,
         scope: &S,
@@ -292,7 +292,7 @@ fn implicit_cast<'a>(
 }
 
 impl Expr {
-    pub fn resolve_types<'a, S: Scope>(
+    pub fn resolve_types<'a, S: Scope<Type=TypeRef>>(
         self,
         type_table: &mut TypeTable<'a>,
         scope: &S,
@@ -407,11 +407,14 @@ impl Expr {
 }
 
 impl Primary<Expr> {
-    pub fn resolve_types<'a, S: Scope>(
+    pub fn resolve_types<'a, S>(
         self,
         type_table: &mut TypeTable<'a>,
         scope: &S,
-    ) -> Result<(Primary<TypedExpr<'a>>, TypeCell<'a>), Error> {
+    ) -> Result<(Primary<TypedExpr<'a>>, TypeCell<'a>), Error>
+    where
+        S: Scope<Type=TypeRef>,
+    {
         Ok(match self {
             Primary::Expr(e) => {
                 let e = e.resolve_types(type_table, scope)?;

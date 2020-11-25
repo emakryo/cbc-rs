@@ -5,21 +5,21 @@ use std::collections::HashMap;
 use std::{cell::RefCell, rc::Rc};
 
 #[derive(Debug, Eq, PartialEq, Clone, Hash)]
-pub enum Entity {
-    Variable { name: String, type_: TypeRef },
-    Function { name: String, type_: TypeRef },
+pub enum Entity<T> {
+    Variable { name: String, type_: T },
+    Function { name: String, type_: T },
 }
 
-impl Entity {
-    pub fn var(name: String, type_: TypeRef) -> Self {
+impl<T> Entity<T> {
+    pub fn var(name: String, type_: T) -> Self {
         Entity::Variable { name, type_ }
     }
 
-    pub fn func(name: String, type_: TypeRef) -> Self {
+    pub fn func(name: String, type_: T) -> Self {
         Entity::Function { name, type_ }
     }
 
-    pub fn get_type(&self) -> &TypeRef {
+    pub fn get_type(&self) -> &T {
         match self {
             Entity::Variable { name: _, type_ } | Entity::Function { name: _, type_ } => type_,
         }
@@ -27,11 +27,11 @@ impl Entity {
 }
 
 #[derive(Debug)]
-pub struct GlobalScope {
-    pub root: Rc<RefCell<LocalScope>>,
+pub struct GlobalScope<T> {
+    pub root: Rc<RefCell<LocalScope<T>>>,
 }
 
-impl GlobalScope {
+impl GlobalScope<TypeRef> {
     pub fn new() -> Self {
         GlobalScope {
             root: Rc::new(RefCell::new(LocalScope::root())),
@@ -45,7 +45,7 @@ impl GlobalScope {
     pub fn add_function(
         &mut self,
         defun: &Defun<TypeRef>,
-    ) -> Result<Rc<RefCell<LocalScope>>, Error> {
+    ) -> Result<Rc<RefCell<LocalScope<TypeRef>>>, Error> {
         let type_ = TypeRef::Pointer {
             base: Box::new(TypeRef::Function {
                 base: Box::new(defun.type_.clone()),
@@ -77,13 +77,13 @@ impl GlobalScope {
     }
 }
 
-pub struct LocalScope {
-    pub entities: HashMap<String, Rc<Entity>>,
-    children: Vec<Rc<RefCell<LocalScope>>>,
-    parent: Option<Rc<RefCell<LocalScope>>>,
+pub struct LocalScope<T> {
+    pub entities: HashMap<String, Rc<Entity<T>>>,
+    children: Vec<Rc<RefCell<LocalScope<T>>>>,
+    parent: Option<Rc<RefCell<LocalScope<T>>>>,
 }
 
-impl std::fmt::Debug for LocalScope {
+impl<T: std::fmt::Debug> std::fmt::Debug for LocalScope<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LocalScope")
             .field("variables", &self.entities)
@@ -93,7 +93,7 @@ impl std::fmt::Debug for LocalScope {
     }
 }
 
-impl LocalScope {
+impl LocalScope<TypeRef> {
     fn root() -> Self {
         let entities = HashMap::new();
         LocalScope {
@@ -103,7 +103,7 @@ impl LocalScope {
         }
     }
 
-    fn add_entity(&mut self, name: String, entity: Entity) -> Result<(), Error> {
+    fn add_entity(&mut self, name: String, entity: Entity<TypeRef>) -> Result<(), Error> {
         if self.entities.contains_key(&name) {
             Err(Error::Semantic(format!(
                 "Duplicated variable declaration: {}",
@@ -120,7 +120,7 @@ impl LocalScope {
     }
 }
 
-pub fn new_scope(parent: Rc<RefCell<LocalScope>>) -> Rc<RefCell<LocalScope>> {
+pub fn new_scope(parent: Rc<RefCell<LocalScope<TypeRef>>>) -> Rc<RefCell<LocalScope<TypeRef>>> {
     let child = Rc::new(RefCell::new(LocalScope {
         entities: HashMap::new(),
         children: Vec::new(),
@@ -132,11 +132,13 @@ pub fn new_scope(parent: Rc<RefCell<LocalScope>>) -> Rc<RefCell<LocalScope>> {
 }
 
 pub trait Scope {
-    fn get_entity(&self, name: &str) -> Option<Rc<Entity>>;
+    type Type;
+    fn get_entity(&self, name: &str) -> Option<Rc<Entity<Self::Type>>>;
 }
 
-impl Scope for LocalScope {
-    fn get_entity(&self, name: &str) -> Option<Rc<Entity>> {
+impl<T> Scope for LocalScope<T> {
+    type Type = T;
+    fn get_entity(&self, name: &str) -> Option<Rc<Entity<T>>> {
         if let Some(var) = self.entities.get(name) {
             Some(Rc::clone(var))
         } else {
@@ -149,8 +151,9 @@ impl Scope for LocalScope {
     }
 }
 
-impl Scope for GlobalScope {
-    fn get_entity(&self, name: &str) -> Option<Rc<Entity>> {
+impl<T> Scope for GlobalScope<T> {
+    type Type = T;
+    fn get_entity(&self, name: &str) -> Option<Rc<Entity<T>>> {
         let scope = self.root.borrow();
         scope.get_entity(name)
     }
