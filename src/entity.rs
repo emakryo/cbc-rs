@@ -1,4 +1,4 @@
-use crate::ast::Params;
+use crate::ast::Defun;
 use crate::error::Error;
 use crate::types::TypeRef;
 use std::collections::HashMap;
@@ -44,17 +44,16 @@ impl GlobalScope {
 
     pub fn add_function(
         &mut self,
-        name: String,
-        return_type: TypeRef,
-        params: Params<TypeRef>,
+        defun: &Defun<TypeRef>,
     ) -> Result<Rc<RefCell<LocalScope>>, Error> {
         let type_ = TypeRef::Pointer {
             base: Box::new(TypeRef::Function {
-                base: Box::new(return_type),
-                params: params.params.iter().map(|(t, _)| t.clone()).collect(),
-                variable_length: params.variable_length,
+                base: Box::new(defun.type_.clone()),
+                params: defun.params.iter().map(|(t, _)| t.clone()).collect(),
+                variable_length: defun.variable_length,
             }),
         };
+        let name = defun.name.0.clone();
 
         self.root
             .borrow_mut()
@@ -68,8 +67,10 @@ impl GlobalScope {
 
         self.root.borrow_mut().children.push(Rc::clone(&child));
 
-        for (type_, var) in params.params {
-            child.borrow_mut().add_variable(var.to_string(), type_)?;
+        for (type_, var) in &defun.params {
+            child
+                .borrow_mut()
+                .add_variable(var.to_string(), type_.clone())?;
         }
 
         Ok(child)

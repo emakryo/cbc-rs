@@ -11,22 +11,14 @@ pub fn resolve_variables(ast: &mut Ast<Expr, TypeRef>) -> Result<GlobalScope, Er
     for def in &mut ast.declarations {
         match def {
             Declaration::Defun(defun, block) => {
-                let scope = global.add_function(
-                    defun.name.to_string(),
-                    defun.type_.clone(),
-                    defun.params.clone(),
-                )?;
+                let scope = global.add_function(defun)?;
                 block.set_scope(scope);
             }
             Declaration::DefVar(def) | Declaration::VarDecl(def) | Declaration::DefConst(def) => {
                 global.add_variable(def.name.to_string(), def.type_.clone())?;
             }
             Declaration::FuncDecl(defun) => {
-                global.add_function(
-                    defun.name.to_string(),
-                    defun.type_.clone(),
-                    defun.params.clone(),
-                )?;
+                global.add_function(defun)?;
             }
             Declaration::DefStuct(_, _)
             | Declaration::DefUnion(_, _)

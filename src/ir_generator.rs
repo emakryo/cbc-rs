@@ -15,7 +15,9 @@ impl<'a, 'b> ast::Ast<'a, ast::TypedExpr<'b>, TypeCell<'b>> {
                     let mut stmts = vec![];
                     let e = def.init.map(|e| e.transform(&mut stmts));
                     if stmts.len() > 0 {
-                        return Err(Error::Semantic("Invalid initial value for global variable".into()));
+                        return Err(Error::Semantic(
+                            "Invalid initial value for global variable".into(),
+                        ));
                     }
                     defvars.push(ast::DefVar {
                         storage: def.storage,
@@ -44,7 +46,11 @@ impl<'a, 'b> ast::Ast<'a, ast::TypedExpr<'b>, TypeCell<'b>> {
     }
 }
 
-fn assign<'a>(stmts: &mut Vec<ir::Statement<'a>>, lhs: ir::Expr<'a>, rhs: ir::Expr<'a>) -> ir::Expr<'a> {
+fn assign<'a>(
+    stmts: &mut Vec<ir::Statement<'a>>,
+    lhs: ir::Expr<'a>,
+    rhs: ir::Expr<'a>,
+) -> ir::Expr<'a> {
     todo!()
 }
 
@@ -75,12 +81,12 @@ impl<'a> ast::Block<ast::TypedExpr<'a>, TypeCell<'a>> {
 }
 
 #[cfg(test)]
-mod test{
+mod test {
     use super::*;
-    use crate::parser::parse_source;
-    use crate::variable_resolver::resolve_variables;
-    use crate::type_resolver::resolve_types;
     use crate::dereference_checker::check_dereference;
+    use crate::parser::parse_source;
+    use crate::type_resolver::resolve_types;
+    use crate::variable_resolver::resolve_variables;
     use std::path::Path;
 
     fn test_from_file(file_name: &Path) {
@@ -120,8 +126,8 @@ mod test{
         let ir = ast.transform(&scope);
         if ir.is_err() {
             dbg!(ir).ok();
-            return
-        }        
+            return;
+        }
     }
 
     //#[test]

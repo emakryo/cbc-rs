@@ -753,22 +753,15 @@ fn fixed_params<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Vec<(TypeRe
     )(i)
 }
 
-fn params<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Params<TypeRef>> {
+fn params<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, (Vec<(TypeRef, Ident)>, bool)> {
     alt((
-        map(
-            tuple((
-                |i| fixed_params(i, types),
-                opt(tuple((sp, char(','), sp, tag("...")))),
-            )),
-            |(p, v)| Params {
-                params: p,
-                variable_length: v.is_some(),
-            },
-        ),
-        map(keyword("void"), |_| Params {
-            params: vec![],
-            variable_length: false,
-        }),
+        tuple((
+            |i| fixed_params(i, types),
+            map(opt(tuple((sp, char(','), sp, tag("...")))), |el| {
+                el.is_some()
+            }),
+        )),
+        map(keyword("void"), |_| (vec![], false)),
     ))(i)
 }
 
@@ -788,13 +781,14 @@ fn defun<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Declaration<Expr, 
             ),
             preceded(sp, |i| block(i, types)),
         )),
-        |(s, t, n, p, b)| {
+        |(s, t, n, (p, v), b)| {
             Declaration::Defun(
                 Defun {
                     storage: s,
                     type_: t,
                     name: n,
                     params: p,
+                    variable_length: v,
                 },
                 b,
             )
@@ -953,12 +947,13 @@ fn func_decl<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Declaration<Ex
                 tuple((sp, char(')'), sp, char(';'))),
             ),
         )),
-        |(t, n, p)| {
+        |(t, n, (p, v))| {
             Declaration::FuncDecl(Defun {
                 storage: Storage { static_: false },
                 type_: t,
                 name: n,
                 params: p,
+                variable_length: v,
             })
         },
     )(i)

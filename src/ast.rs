@@ -305,17 +305,12 @@ pub enum Statement<E, T> {
 }
 
 #[derive(Debug, Eq, PartialEq, Clone)]
-pub struct Params<T> {
-    pub params: Vec<(T, Ident)>,
-    pub variable_length: bool,
-}
-
-#[derive(Debug, Eq, PartialEq, Clone)]
 pub struct Defun<T> {
     pub storage: Storage,
     pub type_: T,
     pub name: Ident,
-    pub params: Params<T>,
+    pub params: Vec<(T, Ident)>,
+    pub variable_length: bool,
 }
 
 #[derive(Debug, Eq, PartialEq)]

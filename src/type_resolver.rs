@@ -53,22 +53,12 @@ pub fn resolve_types<'a, 'b>(
                 })?,
             })),
             Declaration::Defun(defun, block) => Some(Declaration::Defun(
-                Defun {
-                    storage: defun.storage,
-                    type_: type_table.add(defun.type_)?.clone(),
-                    name: defun.name,
-                    params: defun.params.resolve_types(&mut type_table)?,
-                },
+                defun.resolve_types(&mut type_table)?,
                 block.resolve_types(&mut type_table)?,
             )),
-            Declaration::FuncDecl(defun) => Some(Declaration::FuncDecl(
-                Defun {
-                    storage: defun.storage,
-                    type_: type_table.add(defun.type_)?.clone(),
-                    name: defun.name,
-                    params: defun.params.resolve_types(&mut type_table)?,
-                }
-            )),
+            Declaration::FuncDecl(defun) => {
+                Some(Declaration::FuncDecl(defun.resolve_types(&mut type_table)?))
+            }
         };
         if let Some(dec) = dec {
             declarations.push(dec);
@@ -150,20 +140,20 @@ fn check_recursive_definition<'a>(type_table: &TypeTable<'a>) -> Result<(), Erro
     Ok(())
 }
 
-impl Params<TypeRef> {
+impl Defun<TypeRef> {
     fn resolve_types<'a>(
         self,
         type_table: &mut TypeTable<'a>,
-    ) -> Result<Params<TypeCell<'a>>, Error> {
+    ) -> Result<Defun<TypeCell<'a>>, Error> {
         let mut params = vec![];
         for (t, n) in self.params {
-            params.push((
-                type_table.add(t)?.clone(),
-                n,
-            ));
+            params.push((type_table.add(t)?.clone(), n));
         }
 
-        Ok(Params {
+        Ok(Defun {
+            storage: self.storage,
+            type_: type_table.add(self.type_)?.clone(),
+            name: self.name,
             params,
             variable_length: self.variable_length,
         })
