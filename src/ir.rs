@@ -1,49 +1,55 @@
 use crate::ast::{DefVar, Defun};
 use crate::entity::Entity;
-use crate::types::TypeRef;
+use crate::types::TypeCell;
 
 #[derive(Debug)]
-pub enum Statement {
+pub enum Statement<'a> {
     Assign {
-        lhs: Expr,
-        rhs: Expr,
+        lhs: Expr<'a>,
+        rhs: Expr<'a>,
     },
     CJump {
-        cond: Expr,
+        cond: Expr<'a>,
         then: Label,
         else_: Label,
     },
     Jump(Label),
     Switch {
-        cond: Expr,
-        cases: Vec<(Expr, Label)>,
+        cond: Expr<'a>,
+        cases: Vec<(Expr<'a>, Label)>,
         default: Label,
     },
     Label(Label),
-    Expr(Expr),
-    Return(Expr),
+    Expr(Expr<'a>),
+    Return(Expr<'a>),
 }
 
 #[derive(Debug)]
-pub enum Expr {
+pub enum BaseExpr<'a> {
     UniOp {
         op: UniOp,
-        expr: Box<Expr>,
+        expr: Box<Expr<'a>>,
     },
     BinOp {
         op: BinOp,
-        left: Box<Expr>,
-        right: Box<Expr>,
+        left: Box<Expr<'a>>,
+        right: Box<Expr<'a>>,
     },
     Call {
-        expr: Box<Expr>,
-        args: Vec<Expr>,
+        expr: Box<Expr<'a>>,
+        args: Vec<Expr<'a>>,
     },
-    Addr(Box<Expr>),
-    Mem(Box<Expr>),
+    Addr(Box<Expr<'a>>),
+    Mem(Box<Expr<'a>>),
     Var(Entity),
     Int(Constant),
     Str(String),
+}
+
+#[derive(Debug)]
+pub struct Expr<'a> {
+    base: BaseExpr<'a>,
+    type_: TypeCell<'a>,
 }
 
 #[derive(Debug)]
@@ -89,8 +95,8 @@ pub struct Label(String);
 pub enum Constant {}
 
 #[derive(Debug)]
-pub struct IR {
-    pub defvars: Vec<(DefVar<Expr, TypeRef>, Option<Expr>)>,
-    pub defuns: Vec<(Defun, Vec<Statement>)>,
-    pub funcdecls: Vec<Defun>,
+pub struct IR<'a> {
+    pub defvars: Vec<DefVar<Expr<'a>, TypeCell<'a>>>,
+    pub defuns: Vec<(Defun<TypeCell<'a>>, Vec<Statement<'a>>)>,
+    pub funcdecls: Vec<Defun<TypeCell<'a>>>,
 }

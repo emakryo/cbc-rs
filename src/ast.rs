@@ -305,25 +305,25 @@ pub enum Statement<E, T> {
 }
 
 #[derive(Debug, Eq, PartialEq, Clone)]
-pub struct Params {
-    pub params: Vec<(TypeRef, Ident)>,
+pub struct Params<T> {
+    pub params: Vec<(T, Ident)>,
     pub variable_length: bool,
 }
 
 #[derive(Debug, Eq, PartialEq, Clone)]
-pub struct Defun {
+pub struct Defun<T> {
     pub storage: Storage,
-    pub type_: TypeRef,
+    pub type_: T,
     pub name: Ident,
-    pub params: Params,
+    pub params: Params<T>,
 }
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum Declaration<E, T> {
     DefVar(DefVar<E, T>),
     VarDecl(DefVar<E, T>),
-    Defun(Defun, Block<E, T>),
-    FuncDecl(Defun),
+    Defun(Defun<T>, Block<E, T>),
+    FuncDecl(Defun<T>),
     DefConst(DefVar<E, T>),
     DefStuct(Ident, Vec<(T, Ident)>),
     DefUnion(Ident, Vec<(T, Ident)>),

@@ -53,10 +53,22 @@ pub fn resolve_types<'a, 'b>(
                 })?,
             })),
             Declaration::Defun(defun, block) => Some(Declaration::Defun(
-                defun,
+                Defun {
+                    storage: defun.storage,
+                    type_: type_table.add(defun.type_)?.clone(),
+                    name: defun.name,
+                    params: defun.params.resolve_types(&mut type_table)?,
+                },
                 block.resolve_types(&mut type_table)?,
             )),
-            Declaration::FuncDecl(defun) => Some(Declaration::FuncDecl(defun)),
+            Declaration::FuncDecl(defun) => Some(Declaration::FuncDecl(
+                Defun {
+                    storage: defun.storage,
+                    type_: type_table.add(defun.type_)?.clone(),
+                    name: defun.name,
+                    params: defun.params.resolve_types(&mut type_table)?,
+                }
+            )),
         };
         if let Some(dec) = dec {
             declarations.push(dec);
@@ -68,8 +80,6 @@ pub fn resolve_types<'a, 'b>(
         declarations,
         type_alias: ast.type_alias,
     };
-
-    //dbg!(&type_table);
 
     check_duplication(&type_table)?;
     check_recursive_definition(&type_table)?;
@@ -138,6 +148,26 @@ fn check_recursive_definition<'a>(type_table: &TypeTable<'a>) -> Result<(), Erro
     }
 
     Ok(())
+}
+
+impl Params<TypeRef> {
+    fn resolve_types<'a>(
+        self,
+        type_table: &mut TypeTable<'a>,
+    ) -> Result<Params<TypeCell<'a>>, Error> {
+        let mut params = vec![];
+        for (t, n) in self.params {
+            params.push((
+                type_table.add(t)?.clone(),
+                n,
+            ));
+        }
+
+        Ok(Params {
+            params,
+            variable_length: self.variable_length,
+        })
+    }
 }
 
 impl Block<Expr, TypeRef> {
@@ -252,7 +282,7 @@ fn cast_to<'a>(expr: TypedExpr<'a>, type_: &TypeCell<'a>) -> Result<TypedExpr<'a
     })
 }
 
-fn cast<'a>(
+fn implicit_cast<'a>(
     e1: TypedExpr<'a>,
     e2: TypedExpr<'a>,
     type_table: &TypeTable<'a>,
@@ -262,7 +292,7 @@ fn cast<'a>(
     } else {
         let t1 = &e1.type_;
         let t2 = &e2.type_;
-        if t1.is_numeric() || t2.is_numeric() {
+        if !t1.is_numeric() || !t2.is_numeric() {
             return Err(Error::Semantic("Failed to implicit conversion".into()));
         }
 
@@ -295,19 +325,19 @@ impl Expr {
             BaseExpr::BinOp(op, e1, e2) => {
                 let e1 = e1.resolve_types(type_table, scope)?;
                 let e2 = e2.resolve_types(type_table, scope)?;
-                let (e1, e2) = cast(e1, e2, type_table)?;
+                let (e1, e2) = implicit_cast(e1, e2, type_table)?;
                 (e1.type_.clone(), BaseExpr::BinOp(op, e1, e2))
             }
             BaseExpr::Ternary(cond, e1, e2) => {
                 let cond = cond.resolve_types(type_table, scope)?;
                 let e1 = e1.resolve_types(type_table, scope)?;
                 let e2 = e2.resolve_types(type_table, scope)?;
-                let (e1, e2) = cast(e1, e2, type_table)?;
+                let (e1, e2) = implicit_cast(e1, e2, type_table)?;
                 (e1.type_.clone(), BaseExpr::Ternary(cond, e1, e2))
             }
             BaseExpr::Cast(t, e) => {
                 let e = e.resolve_types(type_table, scope)?;
-                let t = type_table.get(&t).unwrap().clone();
+                let t = type_table.add(t).unwrap().clone();
                 (t.clone(), BaseExpr::Cast(t, e))
             }
             BaseExpr::PreInc(e) => {

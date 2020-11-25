@@ -46,7 +46,7 @@ impl GlobalScope {
         &mut self,
         name: String,
         return_type: TypeRef,
-        params: Params,
+        params: Params<TypeRef>,
     ) -> Result<Rc<RefCell<LocalScope>>, Error> {
         let type_ = TypeRef::Pointer {
             base: Box::new(TypeRef::Function {

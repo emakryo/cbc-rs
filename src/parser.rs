@@ -753,7 +753,7 @@ fn fixed_params<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Vec<(TypeRe
     )(i)
 }
 
-fn params<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Params> {
+fn params<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Params<TypeRef>> {
     alt((
         map(
             tuple((
