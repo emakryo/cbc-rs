@@ -6,7 +6,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 pub fn resolve_variables(ast: &mut Ast<Expr, TypeRef>) -> Result<GlobalScope<TypeRef>, Error> {
-    let mut global = GlobalScope::new();
+    let mut global = GlobalScope::new(None);
 
     for def in &mut ast.declarations {
         match def {

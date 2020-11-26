@@ -31,13 +31,18 @@ pub struct GlobalScope<T> {
     pub root: Rc<RefCell<LocalScope<T>>>,
 }
 
-impl GlobalScope<TypeRef> {
-    pub fn new() -> Self {
+impl<T> GlobalScope<T> {
+    pub fn new(root: Option<Rc<RefCell<LocalScope<T>>>>) -> Self {
         GlobalScope {
-            root: Rc::new(RefCell::new(LocalScope::root())),
+            root: match root {
+                Some(r) => r,
+                None => Rc::new(RefCell::new(LocalScope::root())),
+            }
         }
     }
+}
 
+impl GlobalScope<TypeRef> {
     pub fn add_variable(&mut self, name: String, type_: TypeRef) -> Result<(), Error> {
         self.root.borrow_mut().add_variable(name, type_)
     }
@@ -93,8 +98,8 @@ impl<T: std::fmt::Debug> std::fmt::Debug for LocalScope<T> {
     }
 }
 
-impl LocalScope<TypeRef> {
-    fn root() -> Self {
+impl<T> LocalScope<T> {
+    pub fn root() -> Self {
         let entities = HashMap::new();
         LocalScope {
             entities,
@@ -102,7 +107,9 @@ impl LocalScope<TypeRef> {
             parent: None,
         }
     }
+}
 
+impl LocalScope<TypeRef> {
     fn add_entity(&mut self, name: String, entity: Entity<TypeRef>) -> Result<(), Error> {
         if self.entities.contains_key(&name) {
             Err(Error::Semantic(format!(
@@ -120,7 +127,7 @@ impl LocalScope<TypeRef> {
     }
 }
 
-pub fn new_scope(parent: Rc<RefCell<LocalScope<TypeRef>>>) -> Rc<RefCell<LocalScope<TypeRef>>> {
+pub fn new_scope<T>(parent: Rc<RefCell<LocalScope<T>>>) -> Rc<RefCell<LocalScope<T>>> {
     let child = Rc::new(RefCell::new(LocalScope {
         entities: HashMap::new(),
         children: Vec::new(),

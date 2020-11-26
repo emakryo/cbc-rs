@@ -120,12 +120,12 @@ mod test {
         }
         let scope = scope.unwrap();
         let arena = crate::types::TypeArena::new();
-        let ast = resolve_types(ast, &arena, &scope);
+        let ast = resolve_types(ast, &arena, scope);
         if ast.is_err() {
             dbg!(ast).ok();
             return;
         }
-        let ast = ast.unwrap();
+        let (ast, scope) = ast.unwrap();
 
         let verdict = check_dereference(&ast);
         if verdict.is_err() {

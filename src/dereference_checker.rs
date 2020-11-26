@@ -223,12 +223,12 @@ mod tests {
                 continue;
             }
             let arena = crate::types::TypeArena::new();
-            let ast = resolve_types(ast, &arena, &scope.unwrap());
+            let ast = resolve_types(ast, &arena, scope.unwrap());
             if ast.is_err() {
                 dbg!(ast).ok();
                 continue;
             }
-            let ast = ast.unwrap();
+            let (ast, _scope) = ast.unwrap();
 
             let verdict = check_dereference(&ast);
             if verdict.is_err() {
