@@ -70,9 +70,9 @@ fn integer(i: &str) -> IResult<&str, Integer> {
         tuple((
             alt((
                 map_res(preceded(tag("0x"), hex_digit1), |d| {
-                    usize::from_str_radix(d, 16)
+                    isize::from_str_radix(d, 16)
                 }),
-                map_res(digit1, |d: &str| d.parse::<usize>()),
+                map_res(digit1, |d: &str| d.parse::<isize>()),
             )),
             opt(char('U')),
             opt(char('L')),
@@ -207,7 +207,7 @@ fn typeopt<'a>(i: &'a str, types: &'_ TypeMap) -> IResult<&'a str, TypeOpt> {
                 char('['),
                 terminated(opt(preceded(sp, integer)), preceded(sp, char(']'))),
             ),
-            |n| TypeOpt::Array(n.map(|x| x.0)),
+            |n| TypeOpt::Array(n.map(|x| x.0 as usize)),
         ),
         |i: &'a str| func_pointer(i, types),
     ))(i)

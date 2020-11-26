@@ -37,7 +37,7 @@ impl<T> GlobalScope<T> {
             root: match root {
                 Some(r) => r,
                 None => Rc::new(RefCell::new(LocalScope::root())),
-            }
+            },
         }
     }
 }

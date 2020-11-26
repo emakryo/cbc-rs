@@ -1,9 +1,9 @@
 use crate::ast::*;
-use crate::entity::{GlobalScope, LocalScope, Scope, Entity, new_scope};
+use crate::entity::{new_scope, Entity, GlobalScope, LocalScope, Scope};
 use crate::error::Error;
 use crate::types::{TypeArena, TypeCell, TypeRef, TypeTable};
 use std::collections::HashSet;
-use std::{rc::Rc, cell::RefCell};
+use std::{cell::RefCell, rc::Rc};
 
 type TypedScope<'a> = Rc<RefCell<LocalScope<TypeCell<'a>>>>;
 
@@ -11,7 +11,13 @@ pub fn resolve_types<'a, 'b>(
     ast: Ast<'b, Expr, TypeRef>,
     arena: &'a TypeArena<'a>,
     global_scope: GlobalScope<TypeRef>,
-) -> Result<(Ast<'b, TypedExpr<'a>, TypeCell<'a>>, GlobalScope<TypeCell<'a>>), Error> {
+) -> Result<
+    (
+        Ast<'b, TypedExpr<'a>, TypeCell<'a>>,
+        GlobalScope<TypeCell<'a>>,
+    ),
+    Error,
+> {
     let mut type_table = TypeTable::new(arena);
 
     let global_scope = global_scope.resolve_types(&mut type_table)?;
@@ -143,7 +149,10 @@ fn check_recursive_definition<'a>(type_table: &TypeTable<'a>) -> Result<(), Erro
 }
 
 impl GlobalScope<TypeRef> {
-    fn resolve_types<'a>(self, type_table: &mut TypeTable<'a>) -> Result<GlobalScope<TypeCell<'a>>, Error> {
+    fn resolve_types<'a>(
+        self,
+        type_table: &mut TypeTable<'a>,
+    ) -> Result<GlobalScope<TypeCell<'a>>, Error> {
         let root = self.root.borrow().resolve_types(type_table, None)?;
         let scope = GlobalScope::new(Some(root));
 
@@ -152,7 +161,11 @@ impl GlobalScope<TypeRef> {
 }
 
 impl LocalScope<TypeRef> {
-    fn resolve_types<'a>(&self, type_table: &mut TypeTable<'a>, parent: Option<TypedScope<'a>>) -> Result<TypedScope<'a>, Error> {
+    fn resolve_types<'a>(
+        &self,
+        type_table: &mut TypeTable<'a>,
+        parent: Option<TypedScope<'a>>,
+    ) -> Result<TypedScope<'a>, Error> {
         let scope = match parent {
             Some(p) => new_scope(p),
             None => Rc::new(RefCell::new(LocalScope::root())),
@@ -161,7 +174,9 @@ impl LocalScope<TypeRef> {
         {
             let mut scope = scope.borrow_mut();
             for (name, entity) in self.entities.iter() {
-                scope.entities.insert(name.clone(), Rc::new(entity.resolve_types(type_table)?));
+                scope
+                    .entities
+                    .insert(name.clone(), Rc::new(entity.resolve_types(type_table)?));
             }
         }
 
@@ -170,16 +185,19 @@ impl LocalScope<TypeRef> {
 }
 
 impl Entity<TypeRef> {
-    fn resolve_types<'a>(&self, type_table: &mut TypeTable<'a>) -> Result<Entity<TypeCell<'a>>, Error> {
+    fn resolve_types<'a>(
+        &self,
+        type_table: &mut TypeTable<'a>,
+    ) -> Result<Entity<TypeCell<'a>>, Error> {
         Ok(match self {
-            Entity::Variable {name, type_}=> Entity::Variable {
-                name: name.clone(), 
-                type_: type_table.add(type_.clone())?.clone(),
-            },
-            Entity::Function {name, type_} => Entity::Function {
+            Entity::Variable { name, type_ } => Entity::Variable {
                 name: name.clone(),
                 type_: type_table.add(type_.clone())?.clone(),
-            }
+            },
+            Entity::Function { name, type_ } => Entity::Function {
+                name: name.clone(),
+                type_: type_table.add(type_.clone())?.clone(),
+            },
         })
     }
 }
@@ -237,12 +255,10 @@ impl Block<Expr, TypeRef> {
             .map(|stmt| stmt.resolve_types(type_table, scope.clone()))
             .collect();
 
-        drop(scope);
-
         Ok(Block {
             vars: vars?,
             stmts: stmts?,
-            scope: self.scope,
+            scope: Some(scope),
         })
     }
 }
@@ -469,10 +485,7 @@ impl Primary<Expr> {
             Primary::String(s) => (Primary::String(s), type_table.string().clone()),
             Primary::Variable(v) => {
                 let t = scope.borrow().get_entity(&v.name()).unwrap();
-                (
-                    Primary::Variable(v),
-                    t.get_type().clone(),
-                )
+                (Primary::Variable(v), t.get_type().clone())
             }
         })
     }

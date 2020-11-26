@@ -20,7 +20,7 @@ pub struct Character(pub char);
 pub struct String_(pub String);
 
 #[derive(Debug, Eq, PartialEq, Clone, Hash)]
-pub struct Integer(pub usize);
+pub struct Integer(pub isize);
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum TypeBase {
@@ -239,7 +239,7 @@ pub struct DefVar<E, T> {
 pub struct Block<E, T> {
     pub vars: Vec<DefVar<E, T>>,
     pub stmts: Vec<Statement<E, T>>,
-    pub scope: Option<Rc<RefCell<LocalScope<TypeRef>>>>,
+    pub scope: Option<Rc<RefCell<LocalScope<T>>>>,
 }
 
 impl<E: PartialEq, T: PartialEq> PartialEq for Block<E, T> {
@@ -275,14 +275,14 @@ impl<E, T> Block<E, T> {
         &mut self.stmts
     }
 
-    pub fn set_scope(&mut self, scope: Rc<RefCell<LocalScope<TypeRef>>>) {
+    pub fn set_scope(&mut self, scope: Rc<RefCell<LocalScope<T>>>) {
         if self.scope.is_some() {
             panic!("Already scope has set");
         }
         self.scope = Some(scope);
     }
 
-    pub fn get_scope(&self) -> Option<Rc<RefCell<LocalScope<TypeRef>>>> {
+    pub fn get_scope(&self) -> Option<Rc<RefCell<LocalScope<T>>>> {
         self.scope.as_ref().map(Rc::clone)
     }
 }

@@ -1,8 +1,9 @@
 use crate::ast;
-use crate::entity::{GlobalScope, Entity};
+use crate::entity::{Entity, GlobalScope, Scope};
 use crate::error::Error;
 use crate::ir;
 use crate::types::TypeCell;
+use std::rc::Rc;
 
 impl<'a, 'b> ast::Ast<'a, ast::TypedExpr<'b>, TypeCell<'b>> {
     pub fn transform(self, scope: &GlobalScope<TypeCell<'a>>) -> Result<ir::IR<'b>, Error> {
@@ -46,21 +47,57 @@ impl<'a, 'b> ast::Ast<'a, ast::TypedExpr<'b>, TypeCell<'b>> {
     }
 }
 
-fn assign<'a>(
-    stmts: &mut Vec<ir::Statement<'a>>,
-    lhs: ir::Expr<'a>,
-    rhs: ir::Expr<'a>,
-) -> ir::Expr<'a> {
-    todo!()
+fn assign<'a>(stmts: &mut Vec<ir::Statement<'a>>, lhs: ir::Expr<'a>, rhs: ir::Expr<'a>) {
+    stmts.push(ir::Statement::Assign { lhs, rhs });
 }
 
 fn tmp_var<'a>(type_: &TypeCell<'a>) -> ir::Expr<'a> {
     ir::Expr {
-        base: ir::BaseExpr::Var(Entity::Variable{
+        base: ir::BaseExpr::Var(Rc::new(Entity::Variable {
             name: "tmp".into(),
             type_: type_.clone(),
-        }),
+        })),
         type_: type_.clone(),
+    }
+}
+
+impl<'a> ast::Block<ast::TypedExpr<'a>, TypeCell<'a>> {
+    fn transform(self, stmts: &mut Vec<ir::Statement<'a>>) -> Result<(), Error> {
+        for var in self.vars {
+            if let Some(init) = var.init {
+                let ent = self
+                    .scope
+                    .clone()
+                    .unwrap()
+                    .borrow()
+                    .get_entity(&var.name.0)
+                    .unwrap();
+                let lhs = ir::Expr {
+                    base: ir::BaseExpr::Var(ent),
+                    type_: var.type_,
+                };
+                if var.storage.static_ {
+                    todo!()
+                } else {
+                    let rhs = init.transform(stmts)?;
+                    assign(stmts, lhs, rhs);
+                }
+            }
+        }
+
+        for stmt in self.stmts {
+            stmt.transform(stmts)?;
+        }
+
+        Ok(())
+    }
+}
+
+impl<'a> ast::Statement<ast::TypedExpr<'a>, TypeCell<'a>> {
+    fn transform(self, stmts: &mut Vec<ir::Statement<'a>>) -> Result<(), Error> {
+        todo!();
+
+        Ok(())
     }
 }
 
@@ -77,16 +114,33 @@ impl<'a> ast::TypedExpr<'a> {
                 assign(stmts, lhs, tmp.clone());
                 tmp
             }
-            _ => todo!(),
+            Primary(p) => p.transform(stmts, &self.type_)?,
+            e => {
+                dbg!(e);
+                todo!();
+            }
         };
 
         Ok(e)
     }
 }
 
-impl<'a> ast::Block<ast::TypedExpr<'a>, TypeCell<'a>> {
-    fn transform(self, stmts: &mut Vec<ir::Statement>) -> Result<(), Error> {
-        todo!()
+impl<'a> ast::Primary<ast::TypedExpr<'a>> {
+    fn transform(
+        self,
+        stmts: &mut Vec<ir::Statement<'a>>,
+        type_: &TypeCell<'a>,
+    ) -> Result<ir::Expr<'a>, Error> {
+        use ast::Primary::*;
+        let e = match self {
+            Integer(ast::Integer(n)) => ir::Expr {
+                base: ir::BaseExpr::Int(n),
+                type_: type_.clone(),
+            },
+            _ => todo!(),
+        };
+
+        Ok(e)
     }
 }
 
@@ -133,14 +187,15 @@ mod test {
             return;
         }
 
-        // let ir = ast.transform(&scope);
-        // if ir.is_err() {
-        //     dbg!(ir).ok();
-        //     return;
-        // }
+        let ir = ast.transform(&scope);
+        dbg!(&ir);
+        if ir.is_err() {
+            dbg!(ir).ok();
+            return;
+        }
     }
 
-    //#[test]
+    #[test]
     fn test_from_files() {
         let root = env!("CARGO_MANIFEST_DIR");
 

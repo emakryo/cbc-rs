@@ -1,6 +1,7 @@
 use crate::ast::{DefVar, Defun};
 use crate::entity::Entity;
 use crate::types::TypeCell;
+use std::rc::Rc;
 
 #[derive(Debug)]
 pub enum Statement<'a> {
@@ -41,8 +42,8 @@ pub enum BaseExpr<'a> {
     },
     Addr(Box<Expr<'a>>),
     Mem(Box<Expr<'a>>),
-    Var(Entity<TypeCell<'a>>),
-    Int(Constant),
+    Var(Rc<Entity<TypeCell<'a>>>),
+    Int(isize),
     Str(String),
 }
 
@@ -90,9 +91,6 @@ pub enum BinOp {
 
 #[derive(Debug)]
 pub struct Label(String);
-
-#[derive(Debug, Clone)]
-pub enum Constant {}
 
 #[derive(Debug)]
 pub struct IR<'a> {
