@@ -278,7 +278,7 @@ impl Statement<Expr, TypeRef> {
                 let else_ = else_
                     .map(|s| s.resolve_types(type_table, scope))
                     .map_or(Ok(None), |s| s.map(Some))?;
-                Statement::If(cond, Box::new(then), Box::new(else_))
+                Statement::If(cond, Box::new(then), else_.map(Box::new))
             }
             Statement::While(cond, body) => {
                 let cond = cond.resolve_types(type_table, scope.clone())?;

@@ -293,7 +293,7 @@ pub enum Statement<E, T> {
     Label(Ident),
     Expr(E),
     Block(Block<E, T>),
-    If(E, Box<Statement<E, T>>, Box<Option<Statement<E, T>>>),
+    If(E, Box<Statement<E, T>>, Option<Box<Statement<E, T>>>),
     While(E, Box<Statement<E, T>>),
     DoWhile(E, Box<Statement<E, T>>),
     For(E, E, E, Box<Statement<E, T>>),

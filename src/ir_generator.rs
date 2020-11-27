@@ -3,13 +3,15 @@ use crate::entity::{Entity, GlobalScope, Scope};
 use crate::error::Error;
 use crate::ir;
 use crate::types::TypeCell;
+use std::collections::HashSet;
 use std::rc::Rc;
 
 impl<'a, 'b> ast::Ast<'a, ast::TypedExpr<'b>, TypeCell<'b>> {
-    pub fn transform(self, scope: &GlobalScope<TypeCell<'a>>) -> Result<ir::IR<'b>, Error> {
+    pub fn transform<'c>(self, scope: &GlobalScope<TypeCell<'a>>) -> Result<ir::IR<'b>, Error> {
         let mut defvars = vec![];
         let mut defuns = vec![];
         let mut funcdecls = vec![];
+        let mut labels = ir::LabelTable::new();
         for decls in self.declarations {
             match decls {
                 ast::Declaration::DefVar(def) => {
@@ -29,7 +31,7 @@ impl<'a, 'b> ast::Ast<'a, ast::TypedExpr<'b>, TypeCell<'b>> {
                 }
                 ast::Declaration::Defun(def, block) => {
                     let mut stmts = vec![];
-                    block.transform(&mut stmts)?;
+                    block.transform(&mut stmts, &mut labels)?;
                     defuns.push((def, stmts));
                 }
                 ast::Declaration::FuncDecl(def) => {
@@ -62,7 +64,11 @@ fn tmp_var<'a>(type_: &TypeCell<'a>) -> ir::Expr<'a> {
 }
 
 impl<'a> ast::Block<ast::TypedExpr<'a>, TypeCell<'a>> {
-    fn transform(self, stmts: &mut Vec<ir::Statement<'a>>) -> Result<(), Error> {
+    fn transform(
+        self,
+        stmts: &mut Vec<ir::Statement<'a>>,
+        labels: &mut ir::LabelTable,
+    ) -> Result<(), Error> {
         for var in self.vars {
             if let Some(init) = var.init {
                 let ent = self
@@ -86,7 +92,7 @@ impl<'a> ast::Block<ast::TypedExpr<'a>, TypeCell<'a>> {
         }
 
         for stmt in self.stmts {
-            stmt.transform(stmts)?;
+            stmt.transform(stmts, labels)?;
         }
 
         Ok(())
@@ -94,8 +100,51 @@ impl<'a> ast::Block<ast::TypedExpr<'a>, TypeCell<'a>> {
 }
 
 impl<'a> ast::Statement<ast::TypedExpr<'a>, TypeCell<'a>> {
-    fn transform(self, stmts: &mut Vec<ir::Statement<'a>>) -> Result<(), Error> {
-        todo!();
+    fn transform(
+        self,
+        stmts: &mut Vec<ir::Statement<'a>>,
+        labels: &mut ir::LabelTable,
+    ) -> Result<(), Error> {
+        match self {
+            ast::Statement::None => (),
+            ast::Statement::Label(label) => stmts.push(ir::Statement::Label(labels.add(label.0))),
+            ast::Statement::Expr(expr) => {
+                let e = expr.transform(stmts)?;
+                stmts.push(ir::Statement::Expr(e));
+            }
+            ast::Statement::Block(block) => {
+                block.transform(stmts, labels)?;
+            }
+            ast::Statement::If(cond, then, else_) => {
+                let then_label = labels.define_tmp();
+                let else_label = labels.define_tmp();
+                let end_label = labels.define_tmp();
+                let cond = cond.transform(stmts)?;
+                if let Some(else_) = else_ {
+                    stmts.push(ir::Statement::CJump {
+                        cond,
+                        then: then_label.clone(),
+                        else_: else_label.clone(),
+                    });
+                    stmts.push(ir::Statement::Label(then_label));
+                    then.transform(stmts, labels)?;
+                    stmts.push(ir::Statement::Jump(end_label.clone()));
+                    stmts.push(ir::Statement::Label(else_label));
+                    else_.transform(stmts, labels)?;
+                    stmts.push(ir::Statement::Label(end_label));
+                } else {
+                    stmts.push(ir::Statement::CJump {
+                        cond,
+                        then: then_label.clone(),
+                        else_: end_label.clone(),
+                    });
+                    stmts.push(ir::Statement::Label(then_label));
+                    then.transform(stmts, labels)?;
+                    stmts.push(ir::Statement::Label(end_label));
+                }
+            }
+            _ => todo!(),
+        }
 
         Ok(())
     }
@@ -103,9 +152,8 @@ impl<'a> ast::Statement<ast::TypedExpr<'a>, TypeCell<'a>> {
 
 impl<'a> ast::TypedExpr<'a> {
     fn transform(self, stmts: &mut Vec<ir::Statement<'a>>) -> Result<ir::Expr<'a>, Error> {
-        use ast::BaseExpr::*;
         let e = match *self.inner {
-            Assign(lhs, rhs) => {
+            ast::BaseExpr::Assign(lhs, rhs) => {
                 let rhs = rhs.transform(stmts)?;
                 let tmp = tmp_var(&rhs.type_);
 
@@ -114,7 +162,26 @@ impl<'a> ast::TypedExpr<'a> {
                 assign(stmts, lhs, tmp.clone());
                 tmp
             }
-            Primary(p) => p.transform(stmts, &self.type_)?,
+            ast::BaseExpr::Primary(p) => p.transform(stmts, &self.type_)?,
+
+            ast::BaseExpr::Call(func, args) => {
+                let mut ir_args = vec![];
+                for a in args.0 {
+                    ir_args.push(a.transform(stmts)?);
+                }
+                let ret_type = func.type_.clone();
+                let tmp = tmp_var(&ret_type);
+                let call = ir::Expr {
+                    base: ir::BaseExpr::Call {
+                        expr: Box::new(func.transform(stmts)?),
+                        args: ir_args,
+                    },
+                    type_: ret_type,
+                };
+
+                assign(stmts, tmp.clone(), call);
+                tmp
+            }
             e => {
                 dbg!(e);
                 todo!();
@@ -137,7 +204,14 @@ impl<'a> ast::Primary<ast::TypedExpr<'a>> {
                 base: ir::BaseExpr::Int(n),
                 type_: type_.clone(),
             },
-            _ => todo!(),
+            String(x) => ir::Expr {
+                base: ir::BaseExpr::Str(x.0),
+                type_: type_.clone(),
+            },
+            p => {
+                dbg!(p);
+                todo!()
+            }
         };
 
         Ok(e)

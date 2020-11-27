@@ -671,7 +671,7 @@ fn statement<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Statement<Expr
                 preceded(tuple((sp, char(')'), sp)), statement),
                 opt(preceded(tuple((sp, tag("else"), sp)), statement)),
             )),
-            |(e, b1, b2)| Statement::If(e, Box::new(b1), Box::new(b2)),
+            |(e, b1, b2)| Statement::If(e, Box::new(b1), b2.map(Box::new)),
         ),
         map(
             tuple((

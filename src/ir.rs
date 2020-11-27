@@ -1,6 +1,8 @@
 use crate::ast::{DefVar, Defun};
 use crate::entity::Entity;
+use crate::error::Error;
 use crate::types::TypeCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 #[derive(Debug)]
@@ -89,8 +91,51 @@ pub enum BinOp {
     ULtEq,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Label(String);
+
+#[derive(Debug)]
+pub struct LabelTable {
+    table: HashMap<String, bool>,
+    tmp_count: u64,
+}
+
+impl LabelTable {
+    pub fn new() -> Self {
+        LabelTable {
+            table: HashMap::new(),
+            tmp_count: 1,
+        }
+    }
+
+    pub fn add(&mut self, name: String) -> Label {
+        if !self.table.contains_key(&name) {
+            self.table.insert(name.clone(), false);
+        }
+        Label(name)
+    }
+
+    pub fn define_tmp(&mut self) -> Label {
+        let name = format!("tmp{}", self.tmp_count);
+        self.tmp_count += 1;
+        self.define(name)
+    }
+
+    pub fn define(&mut self, name: String) -> Label {
+        self.table.insert(name.clone(), true);
+        Label(name)
+    }
+
+    pub fn check(&self) -> Result<(), Error> {
+        for (k, v) in &self.table {
+            if !v {
+                return Err(Error::Semantic(format!("Unknown label: {}", k)));
+            }
+        }
+
+        return Ok(());
+    }
+}
 
 #[derive(Debug)]
 pub struct IR<'a> {
