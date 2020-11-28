@@ -3,7 +3,6 @@ use crate::entity::{Entity, GlobalScope, Scope};
 use crate::error::Error;
 use crate::ir;
 use crate::types::TypeCell;
-use std::collections::HashSet;
 use std::rc::Rc;
 
 impl<'a, 'b> ast::Ast<'a, ast::TypedExpr<'b>, TypeCell<'b>> {
@@ -150,6 +149,39 @@ impl<'a> ast::Statement<ast::TypedExpr<'a>, TypeCell<'a>> {
     }
 }
 
+impl ast::BinOp {
+    fn transform<'a>(self, type_: &TypeCell<'a>) -> Result<ir::BinOp, Error> {
+        let signed = type_.is_signed().unwrap();
+        let op = match self {
+            ast::BinOp::Greater => ir::BinOp::Gt { signed },
+            ast::BinOp::GreaterEq => ir::BinOp::GtEq { signed },
+            ast::BinOp::Less => ir::BinOp::Lt { signed },
+            ast::BinOp::LessEq => ir::BinOp::LtEq { signed },
+            ast::BinOp::Eq => ir::BinOp::Eq,
+            ast::BinOp::Neq => ir::BinOp::Neq,
+            ast::BinOp::BitwiseOr => ir::BinOp::BitOr,
+            ast::BinOp::BitwiseXor => ir::BinOp::BitXor,
+            ast::BinOp::BitwiseAnd => ir::BinOp::BitAnd,
+            ast::BinOp::LShift => ir::BinOp::BitLShift,
+            ast::BinOp::RShift => {
+                if signed {
+                    ir::BinOp::ArihtRShift
+                } else {
+                    ir::BinOp::BitRShift
+                }
+            }
+            ast::BinOp::Plus => ir::BinOp::Add,
+            ast::BinOp::Minus => ir::BinOp::Sub,
+            ast::BinOp::Mul => ir::BinOp::Mul,
+            ast::BinOp::Div => ir::BinOp::Div { signed },
+            ast::BinOp::Mod => ir::BinOp::Mod { signed },
+            _ => panic!(),
+        };
+
+        Ok(op)
+    }
+}
+
 impl<'a> ast::TypedExpr<'a> {
     fn transform(self, stmts: &mut Vec<ir::Statement<'a>>) -> Result<ir::Expr<'a>, Error> {
         let e = match *self.inner {
@@ -163,7 +195,6 @@ impl<'a> ast::TypedExpr<'a> {
                 tmp
             }
             ast::BaseExpr::Primary(p) => p.transform(stmts, &self.type_)?,
-
             ast::BaseExpr::Call(func, args) => {
                 let mut ir_args = vec![];
                 for a in args.0 {
@@ -181,6 +212,23 @@ impl<'a> ast::TypedExpr<'a> {
 
                 assign(stmts, tmp.clone(), call);
                 tmp
+            }
+            ast::BaseExpr::BinOp(op, e1, e2) => {
+                let e1 = e1.transform(stmts)?;
+                let e2 = e2.transform(stmts)?;
+                let op = op.transform(&self.type_)?;
+                if &e1.type_ != &e2.type_ {
+                    return Err(Error::Semantic("Type mismatch".into()));
+                }
+
+                ir::Expr {
+                    base: ir::BaseExpr::BinOp {
+                        op,
+                        left: Box::new(e1.clone()),
+                        right: Box::new(e2),
+                    },
+                    type_: e1.type_,
+                }
             }
             e => {
                 dbg!(e);

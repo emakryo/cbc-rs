@@ -367,12 +367,12 @@ impl Expr {
                 let e2 = cast_to(e2, &t)?;
                 (t, BaseExpr::Assign(e1, e2))
             }
-            BaseExpr::AssignOp(e1, op, e2) => {
+            BaseExpr::AssignOp(op, e1, e2) => {
                 let e1 = e1.resolve_types(type_table, scope.clone())?;
                 let t = e1.type_.clone();
                 let e2 = e2.resolve_types(type_table, scope)?;
                 let e2 = cast_to(e2, &t)?;
-                (t, BaseExpr::AssignOp(e1, op, e2))
+                (t, BaseExpr::AssignOp(op, e1, e2))
             }
             BaseExpr::BinOp(op, e1, e2) => {
                 let e1 = e1.resolve_types(type_table, scope.clone())?;

@@ -94,7 +94,7 @@ impl<'a> Block<TypedExpr<'a>, TypeCell<'a>> {
 impl<'a> TypedExpr<'a> {
     fn check_deref<'b>(&self) -> Result<(), Error> {
         match self.inner.as_ref() {
-            BaseExpr::Assign(t, e) | BaseExpr::AssignOp(t, _, e) => {
+            BaseExpr::Assign(t, e) | BaseExpr::AssignOp(_, t, e) => {
                 if !t.is_assignable()? {
                     return Err(Error::Semantic(format!("Not assignable: {:?}", t)));
                 }

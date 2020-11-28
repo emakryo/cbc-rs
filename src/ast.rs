@@ -102,7 +102,7 @@ pub struct Args<E>(pub Vec<E>);
 #[derive(Debug, Eq, PartialEq, Clone, Hash)]
 pub enum BaseExpr<E, T> {
     Assign(E, E),
-    AssignOp(E, AssignOp, E),
+    AssignOp(AssignOp, E, E),
     Ternary(E, E, E),
     BinOp(BinOp, E, E),
     Cast(T, E),
@@ -130,7 +130,7 @@ impl Expr {
         Expr(Box::new(BaseExpr::Assign(lhs, rhs)))
     }
     pub fn assign_op(lhs: Expr, op: AssignOp, rhs: Expr) -> Expr {
-        Expr(Box::new(BaseExpr::AssignOp(lhs, op, rhs)))
+        Expr(Box::new(BaseExpr::AssignOp(op, lhs, rhs)))
     }
     pub fn ternary(cond: Expr, then: Expr, else_: Expr) -> Expr {
         Expr(Box::new(BaseExpr::Ternary(cond, then, else_)))

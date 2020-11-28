@@ -66,44 +66,42 @@ impl<'a> Type<'a> {
     fn is_numeric(&self) -> bool {
         matches!(self, Type::Integer{..})
     }
+    fn is_signed(&self) -> Option<bool> {
+        match self {
+            Type::Integer { signed, .. } => Some(*signed),
+            _ => None,
+        }
+    }
     fn is_void(&self) -> bool {
         *self == Type::Void
     }
-
     fn is_pointer(&self) -> bool {
         self.pointer_base().is_some()
     }
-
     fn is_array(&self) -> bool {
         matches!(self, Type::Array { .. })
     }
-
     fn is_function(&self) -> bool {
         matches!(self, Type::Function { .. })
     }
-
     fn is_func_pointer(&self) -> bool {
         self.return_type().is_some()
     }
-
     fn is_undefined(&self) -> bool {
         matches!(self, Type::Undefined)
     }
-
     fn pointer_base(&self) -> Option<TypeCell<'a>> {
         match self {
             Type::Pointer { base } => Some(base.clone()),
             _ => None,
         }
     }
-
     fn array_base(&self) -> Option<TypeCell<'a>> {
         match self {
             Type::Array { base, .. } => Some(base.clone()),
             _ => None,
         }
     }
-
     fn return_type(&self) -> Option<TypeCell<'a>> {
         let t = self.pointer_base()?;
         let t = t.borrow();
@@ -113,7 +111,6 @@ impl<'a> Type<'a> {
             _ => None,
         }
     }
-
     fn params(&self) -> Option<Vec<TypeCell<'a>>> {
         let t = self.pointer_base()?;
         let t = t.borrow();
@@ -123,77 +120,66 @@ impl<'a> Type<'a> {
             _ => None,
         }
     }
-
     fn members(&self) -> Option<Vec<(TypeCell<'a>, Ident)>> {
         match self {
             Type::Struct { members, .. } | Type::Union { members, .. } => Some(members.clone()),
             _ => None,
         }
     }
-
     fn deref(&self) -> Result<&TypeCell<'a>, Error> {
         match self {
             Type::Pointer { base } => Ok(base),
             _ => Err(Error::Semantic("Dereference of non-pointer type".into())),
         }
     }
-
     fn long() -> Self {
         Type::Integer {
             size: 8,
             signed: true,
         }
     }
-
     fn ulong() -> Self {
         Type::Integer {
             size: 8,
             signed: false,
         }
     }
-
     fn int() -> Self {
         Type::Integer {
             size: 4,
             signed: true,
         }
     }
-
     fn uint() -> Self {
         Type::Integer {
             size: 4,
             signed: false,
         }
     }
-
     fn short() -> Self {
         Type::Integer {
             size: 2,
             signed: true,
         }
     }
-
     fn ushort() -> Self {
         Type::Integer {
             size: 2,
             signed: false,
         }
     }
-
     fn char() -> Self {
         Type::Integer {
             size: 1,
             signed: true,
         }
     }
-
     fn uchar() -> Self {
         Type::Integer {
             size: 1,
             signed: false,
         }
     }
-
     fn get_field(&self, name: &Ident) -> Result<&TypeCell<'a>, Error> {
         match self {
             Type::Struct { members, .. } | Type::Union { members, .. } => {
@@ -237,6 +223,9 @@ impl<'a> TypeCell<'a> {
     }
     pub fn is_numeric(&self) -> bool {
         self.borrow().is_numeric()
+    }
+    pub fn is_signed(&self) -> Option<bool> {
+        self.borrow().is_signed()
     }
     pub fn is_pointer(&self) -> bool {
         self.borrow().is_pointer()

@@ -144,7 +144,7 @@ impl Expr {
                 resolve!(t);
                 resolve!(e);
             }
-            BaseExpr::AssignOp(t, _, e) => {
+            BaseExpr::AssignOp(_, t, e) => {
                 resolve!(t);
                 resolve!(e);
             }
