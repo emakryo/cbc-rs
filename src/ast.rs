@@ -64,34 +64,34 @@ pub enum UnaryOp {
 }
 
 #[derive(Debug, Eq, PartialEq, Clone, Hash)]
-pub enum Primary<E> {
+pub enum Primary<E, T> {
     Integer(Integer),
     Character(Character),
     String(String_),
-    Variable(Variable),
+    Variable(Variable<T>),
     Expr(Box<E>),
 }
 
 #[derive(Debug, Eq, PartialEq, Clone, Hash)]
-pub struct Variable {
+pub struct Variable<T> {
     name: Ident,
-    entity: Option<Rc<Entity<TypeRef>>>,
+    entity: Option<Rc<Entity<T>>>,
 }
 
-impl Variable {
+impl<T> Variable<T> {
     pub fn new(name: Ident) -> Self {
         Variable { name, entity: None }
     }
     pub fn name(&self) -> String {
         self.name.0.clone()
     }
-    pub fn set_entity(&mut self, entity: Rc<Entity<TypeRef>>) {
+    pub fn set_entity(&mut self, entity: Rc<Entity<T>>) {
         if self.entity.is_some() {
             panic!("variable already set entity");
         }
         self.entity = Some(entity)
     }
-    pub fn get_entity(&self) -> Option<Rc<Entity<TypeRef>>> {
+    pub fn get_entity(&self) -> Option<Rc<Entity<T>>> {
         self.entity.as_ref().map(Rc::clone)
     }
 }
@@ -119,7 +119,7 @@ pub enum BaseExpr<E, T> {
     Member(E, Ident),
     PMember(E, Ident),
     Call(E, Args<E>),
-    Primary(Primary<E>),
+    Primary(Primary<E, T>),
 }
 
 #[derive(Debug, Eq, PartialEq, Clone, Hash)]
@@ -180,7 +180,7 @@ impl Expr {
     pub fn call(func: Expr, args: Args<Expr>) -> Expr {
         Expr(Box::new(BaseExpr::Call(func, args)))
     }
-    pub fn primary(p: Primary<Expr>) -> Expr {
+    pub fn primary(p: Primary<Expr, TypeRef>) -> Expr {
         Expr(Box::new(BaseExpr::Primary(p)))
     }
 }
@@ -297,7 +297,7 @@ pub enum Statement<E, T> {
     While(E, Box<Statement<E, T>>),
     DoWhile(E, Box<Statement<E, T>>),
     For(E, E, E, Box<Statement<E, T>>),
-    Switch(E, Vec<(Vec<Primary<E>>, Block<E, T>)>),
+    Switch(E, Vec<(Vec<Primary<E, T>>, Block<E, T>)>),
     Break,
     Continue,
     Goto(Ident),

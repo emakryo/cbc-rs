@@ -240,20 +240,23 @@ impl<'a> ast::TypedExpr<'a> {
     }
 }
 
-impl<'a> ast::Primary<ast::TypedExpr<'a>> {
+impl<'a> ast::Primary<ast::TypedExpr<'a>, TypeCell<'a>> {
     fn transform(
         self,
         stmts: &mut Vec<ir::Statement<'a>>,
         type_: &TypeCell<'a>,
     ) -> Result<ir::Expr<'a>, Error> {
-        use ast::Primary::*;
         let e = match self {
-            Integer(ast::Integer(n)) => ir::Expr {
+            ast::Primary::Integer(ast::Integer(n)) => ir::Expr {
                 base: ir::BaseExpr::Int(n),
                 type_: type_.clone(),
             },
-            String(x) => ir::Expr {
+            ast::Primary::String(x) => ir::Expr {
                 base: ir::BaseExpr::Str(x.0),
+                type_: type_.clone(),
+            },
+            ast::Primary::Variable(x) => ir::Expr {
+                base: ir::BaseExpr::Var(x.get_entity().unwrap()),
                 type_: type_.clone(),
             },
             p => {

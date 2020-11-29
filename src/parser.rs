@@ -356,7 +356,7 @@ fn postfix<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Postfix> {
     ))(i)
 }
 
-fn primary<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Primary<Expr>> {
+fn primary<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Primary<Expr, TypeRef>> {
     alt((
         map(integer, Primary::Integer),
         map(character, Primary::Character),
@@ -717,7 +717,7 @@ fn statement<'a>(i: &'a str, types: &TypeMap) -> IResult<&'a str, Statement<Expr
 fn cases<'a>(
     i: &'a str,
     types: &TypeMap,
-) -> IResult<&'a str, Vec<(Vec<Primary<Expr>>, Block<Expr, TypeRef>)>> {
+) -> IResult<&'a str, Vec<(Vec<Primary<Expr, TypeRef>>, Block<Expr, TypeRef>)>> {
     map(
         pair(
             many0(pair(

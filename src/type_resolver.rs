@@ -468,12 +468,12 @@ impl Expr {
     }
 }
 
-impl Primary<Expr> {
+impl Primary<Expr, TypeRef> {
     pub fn resolve_types<'a>(
         self,
         type_table: &mut TypeTable<'a>,
         scope: TypedScope<'a>,
-    ) -> Result<(Primary<TypedExpr<'a>>, TypeCell<'a>), Error> {
+    ) -> Result<(Primary<TypedExpr<'a>, TypeCell<'a>>, TypeCell<'a>), Error> {
         Ok(match self {
             Primary::Expr(e) => {
                 let e = e.resolve_types(type_table, scope)?;
@@ -485,6 +485,8 @@ impl Primary<Expr> {
             Primary::String(s) => (Primary::String(s), type_table.string().clone()),
             Primary::Variable(v) => {
                 let t = scope.borrow().get_entity(&v.name()).unwrap();
+                let mut v = Variable::new(Ident(v.name()));
+                v.set_entity(t.clone());
                 (Primary::Variable(v), t.get_type().clone())
             }
         })

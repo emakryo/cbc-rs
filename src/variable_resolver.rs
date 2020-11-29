@@ -183,7 +183,7 @@ impl Expr {
     }
 }
 
-impl Primary<Expr> {
+impl Primary<Expr, TypeRef> {
     fn resolve_variables(&mut self, scope: Rc<RefCell<LocalScope<TypeRef>>>) -> Result<(), Error> {
         match self {
             Primary::Variable(v) => {

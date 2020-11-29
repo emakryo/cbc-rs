@@ -180,7 +180,7 @@ impl<'a> TypedExpr<'a> {
     }
 }
 
-impl<'a> Primary<TypedExpr<'a>> {
+impl<'a> Primary<TypedExpr<'a>, TypeCell<'a>> {
     fn is_constant(&self) -> bool {
         match self {
             Primary::Integer(_) | Primary::Character(_) | Primary::String(_) => true,
