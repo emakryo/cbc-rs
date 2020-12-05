@@ -2,6 +2,7 @@ use crate::ast::Ident;
 use crate::error::Error;
 use std::cell::{Cell, Ref, RefCell, RefMut};
 use std::collections::HashMap;
+use std::hash::Hash;
 use typed_arena::Arena;
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
@@ -32,7 +33,7 @@ pub enum TypeRef {
     Void,
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub enum Type<'a> {
     Void,
     Array {
@@ -60,6 +61,61 @@ pub enum Type<'a> {
         members: Vec<(TypeCell<'a>, Ident)>,
     },
     Undefined,
+}
+
+impl<'a> std::fmt::Debug for Type<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            Type::Void => f.write_str("Void")?,
+            Type::Array { base, size } => {
+                write!(f, "{:?}[", base)?;
+                if let Some(s) = size {
+                    f.write_str(&s.to_string())?;
+                }
+                write!(f, "]")?;
+            }
+            Type::Integer { size, signed } => {
+                f.write_str(if *signed { "i" } else { "u" })?;
+                write!(f, "{}", 8 * size)?;
+            }
+            Type::Pointer { base } => {
+                write!(f, "*{:?}", base)?;
+            }
+            Type::Function {
+                base,
+                params,
+                variable_length,
+            } => {
+                let mut g = f.debug_tuple(&format!("{:?}", base));
+                for t in params {
+                    g.field(t);
+                }
+                if *variable_length {
+                    g.field(&"...");
+                }
+                g.finish()?;
+            }
+            Type::Struct { name, members } => {
+                let mut g = f.debug_struct(&format!("struct {:?}", &name.0));
+                for (t, n) in members {
+                    g.field(&n.0, &format!("{}", t));
+                }
+                g.finish()?;
+            }
+            Type::Union { name, members } => {
+                let mut g = f.debug_struct(&format!("union {:?}", &name.0));
+                for (t, n) in members {
+                    g.field(&n.0, &format!("{}", t));
+                }
+                g.finish()?;
+            }
+            Type::Undefined => {
+                f.write_str("undefined")?;
+            }
+        }
+
+        Ok(())
+    }
 }
 
 impl<'a> Type<'a> {
@@ -206,11 +262,19 @@ impl<'a> std::hash::Hash for TypeCell<'a> {
     }
 }
 
-impl<'a> std::fmt::Debug for TypeCell<'a> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+impl<'a> std::fmt::Display for TypeCell<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("TypeCell")
             .field(&(self.0.get() as *const _))
             .finish()
+    }
+}
+
+impl<'a> std::fmt::Debug for TypeCell<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{:?}", self.borrow())?;
+        // write!(f, "({:?})", &(self.0.get() as *const _))
+        Ok(())
     }
 }
 

@@ -185,7 +185,7 @@ impl Expr {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TypedExpr<'a> {
     pub inner: Box<BaseExpr<TypedExpr<'a>, TypeCell<'a>>>,
     pub type_: TypeCell<'a>,

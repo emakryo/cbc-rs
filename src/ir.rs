@@ -5,7 +5,7 @@ use crate::types::TypeCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Statement<'a> {
     Assign {
         lhs: Expr<'a>,
@@ -24,7 +24,7 @@ pub enum Statement<'a> {
     },
     Label(Label),
     Expr(Expr<'a>),
-    Return(Expr<'a>),
+    Return(Option<Expr<'a>>),
 }
 
 #[derive(Debug, Clone)]

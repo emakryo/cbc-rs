@@ -20,24 +20,27 @@ pub fn resolve_types<'a, 'b>(
 > {
     let mut type_table = TypeTable::new(arena);
 
-    let global_scope = global_scope.resolve_types(&mut type_table)?;
-    let scope = global_scope.root.clone();
-
     let mut declarations = vec![];
-    for dec in ast.declarations {
-        let dec = match dec {
+    for dec in &ast.declarations {
+        match dec {
             Declaration::TypeDef(typeref, n) => {
                 type_table.add_usertype(n.clone(), typeref.clone())?;
-                None
             }
             Declaration::DefStuct(n, members) => {
                 type_table.add_struct(n.clone(), members.clone())?;
-                None
             }
             Declaration::DefUnion(n, members) => {
                 type_table.add_union(n.clone(), members.clone())?;
-                None
             }
+            _ => (),
+        };
+    }
+
+    let global_scope = global_scope.resolve_types(&mut type_table)?;
+    let scope = global_scope.root.clone();
+
+    for dec in ast.declarations {
+        let dec = match dec {
             Declaration::DefVar(def) => Some(Declaration::DefVar(DefVar {
                 storage: def.storage,
                 type_: type_table.add(def.type_)?.clone(),
@@ -67,6 +70,7 @@ pub fn resolve_types<'a, 'b>(
             Declaration::FuncDecl(defun) => {
                 Some(Declaration::FuncDecl(defun.resolve_types(&mut type_table)?))
             }
+            _ => None,
         };
         if let Some(dec) = dec {
             declarations.push(dec);

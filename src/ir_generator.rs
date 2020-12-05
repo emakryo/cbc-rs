@@ -142,7 +142,14 @@ impl<'a> ast::Statement<ast::TypedExpr<'a>, TypeCell<'a>> {
                     stmts.push(ir::Statement::Label(end_label));
                 }
             }
-            _ => todo!(),
+            ast::Statement::Return(expr) => {
+                let expr = expr.map_or(Ok(None), |e| e.transform(stmts).map(Some))?;
+                stmts.push(ir::Statement::Return(expr));
+            }
+            x => {
+                dbg!(x);
+                todo!()
+            }
         }
 
         Ok(())
@@ -200,7 +207,7 @@ impl<'a> ast::TypedExpr<'a> {
                 for a in args.0 {
                     ir_args.push(a.transform(stmts)?);
                 }
-                let ret_type = func.type_.clone();
+                let ret_type = func.type_.return_type().unwrap();
                 let tmp = tmp_var(&ret_type);
                 let call = ir::Expr {
                     base: ir::BaseExpr::Call {
@@ -218,6 +225,7 @@ impl<'a> ast::TypedExpr<'a> {
                 let e2 = e2.transform(stmts)?;
                 let op = op.transform(&self.type_)?;
                 if &e1.type_ != &e2.type_ {
+                    dbg!(e1, e2);
                     return Err(Error::Semantic("Type mismatch".into()));
                 }
 
@@ -228,6 +236,20 @@ impl<'a> ast::TypedExpr<'a> {
                         right: Box::new(e2),
                     },
                     type_: e1.type_,
+                }
+            }
+            ast::BaseExpr::Cast(t, e) => {
+                let e = e.transform(stmts)?;
+                ir::Expr {
+                    base: ir::BaseExpr::UniOp {
+                        op: if t.is_signed().unwrap() {
+                            ir::UniOp::SCast
+                        } else {
+                            ir::UniOp::UCast
+                        },
+                        expr: Box::new(e),
+                    },
+                    type_: t,
                 }
             }
             e => {
@@ -305,6 +327,7 @@ mod test {
             return;
         }
         let (ast, scope) = ast.unwrap();
+        dbg!(&ast);
 
         let verdict = check_dereference(&ast);
         if verdict.is_err() {
@@ -326,6 +349,7 @@ mod test {
 
         for file_name in glob::glob(&format!("{}/cbc-1.0/test/*.cb", root)).unwrap() {
             test_from_file(&file_name.unwrap());
+            break;
         }
     }
 }
